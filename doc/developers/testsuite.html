@@ -82,7 +82,7 @@ $ git clone https://github.com/dealii/dealii
 
     <p>
       To enable the testsuite for a given build directory, ensure that
-      deal.II is successfully configured and build (installation is not
+      deal.II is successfully configured and built (installation is not
       necessary). After that you can set up the testsuite via the
       "setup_tests" target:
 <pre>
@@ -725,6 +725,18 @@ $ ctest [...] -V -S ../tests/run_testsuite.cmake
       to the CDash server. It does not matter whether the configure, build
       or ctest stages were run before that. Also in script mode, you can
       specify the same options for <code>ctest</code> as explained above.
+    </p>
+
+    <p>
+      It is possible to run tests and submit results for an already installed library by
+<pre>
+mkdir build && cd build
+cp $DEAL_II_SOURCE_DIR/CTestConfig.cmake .
+ctest \
+  -DCTEST_SOURCE_DIRECTORY=$DEAL_II_SOURCE_DIR/tests \
+  -DDEAL_II_DIR=$DEAL_II_DIR \
+  [...] -S $DEAL_II_SOURCE_DIR/tests/run_testsuite.cmake -V
+</pre>
     </p>
 
     <p>

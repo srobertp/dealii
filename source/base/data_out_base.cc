@@ -1501,7 +1501,7 @@ namespace DataOutBase
   template <int dim, int spacedim>
   const unsigned int Patch<dim,spacedim>::space_dim;
 
-  const unsigned int Deal_II_IntermediateFlags::format_version;
+  const unsigned int Deal_II_IntermediateFlags::format_version = 3;
 
 
 
@@ -1602,6 +1602,29 @@ namespace DataOutBase
     :
     write_preamble (write_preamble)
   {}
+
+
+
+  GnuplotFlags::GnuplotFlags ()
+  {
+    space_dimension_labels.push_back("x");
+    space_dimension_labels.push_back("y");
+    space_dimension_labels.push_back("z");
+  }
+
+
+
+  GnuplotFlags::GnuplotFlags (const std::vector<std::string> &labels)
+    : space_dimension_labels(labels)
+  {}
+
+
+
+  std::size_t
+  GnuplotFlags::memory_consumption () const
+  {
+    return MemoryConsumption::memory_consumption(space_dimension_labels);
+  }
 
 
 
@@ -2909,7 +2932,7 @@ namespace DataOutBase
   void write_gnuplot (const std::vector<Patch<dim,spacedim> > &patches,
                       const std::vector<std::string>          &data_names,
                       const std::vector<std_cxx11::tuple<unsigned int, unsigned int, std::string> > &,
-                      const GnuplotFlags                      &/*flags*/,
+                      const GnuplotFlags                      &flags,
                       std::ostream                            &out)
   {
     AssertThrow (out, ExcIO());
@@ -2947,20 +2970,11 @@ namespace DataOutBase
           << "#" << '\n'
           << "# ";
 
-      switch (spacedim)
+      AssertThrow(spacedim <= flags.space_dimension_labels.size(),
+                  GnuplotFlags::ExcNotEnoughSpaceDimensionLabels());
+      for (unsigned int spacedim_n=0; spacedim_n<spacedim; ++spacedim_n)
         {
-        case 1:
-          out << "<x> ";
-          break;
-        case 2:
-          out << "<x> <y> ";
-          break;
-        case 3:
-          out << "<x> <y> <z> ";
-          break;
-
-        default:
-          Assert (false, ExcNotImplemented());
+          out << '<' << flags.space_dimension_labels.at(spacedim_n) << "> ";
         }
 
       for (unsigned int i=0; i<data_names.size(); ++i)
@@ -5521,8 +5535,6 @@ namespace DataOutBase
     for (; patch != patches.end(); ++patch)
       {
         n_subdivisions = patch->n_subdivisions;
-        n = n_subdivisions + 1;
-
         for (unsigned int i2 = 0; i2 < n_subdivisions; ++i2)
           {
             for (unsigned int i1 = 0; i1 < n_subdivisions; ++i1)
@@ -5592,7 +5604,6 @@ namespace DataOutBase
     for (patch = patches.begin(); patch != patches.end(); ++patch)
       {
         n_subdivisions = patch->n_subdivisions;
-        n = n_subdivisions + 1;
 
         for (unsigned int i2 = 0; i2 < n_subdivisions; ++i2)
           {
@@ -6153,7 +6164,12 @@ void DataOutInterface<dim,spacedim>::write_vtu_in_parallel (const char *filename
   MPI_File fh;
   err = MPI_File_open(comm, const_cast<char *>(filename),
                       MPI_MODE_CREATE | MPI_MODE_WRONLY, info, &fh);
-  AssertThrow(err==0, ExcMessage("Unable to open file with MPI_File_open!"));
+  AssertThrow(err==0,
+              ExcMessage("Unable to open file <"
+                         + std::string(filename) +
+                         "> with MPI_File_open. The error code "
+                         "returned was "
+                         + Utilities::to_string(err) + "."));
 
 
   MPI_File_set_size(fh, 0); // delete the file contents

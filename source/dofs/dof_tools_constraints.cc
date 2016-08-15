@@ -35,7 +35,7 @@
 #include <deal.II/dofs/dof_tools.h>
 
 #ifdef DEAL_II_WITH_MPI
-#include <deal.II/lac/parallel_vector.h>
+#include <deal.II/lac/la_parallel_vector.h>
 #endif
 
 #include <algorithm>
@@ -2504,7 +2504,7 @@ namespace DoFTools
         unsigned int                         dofs_per_cell;
         std::vector<types::global_dof_index> parameter_dof_indices;
 #ifdef DEAL_II_WITH_MPI
-        std::vector<dealii::parallel::distributed::Vector<double> > global_parameter_representation;
+        std::vector<dealii::LinearAlgebra::distributed::Vector<double> > global_parameter_representation;
 #else
         std::vector<dealii::Vector<double> > global_parameter_representation;
 #endif
@@ -3199,7 +3199,7 @@ namespace DoFTools
     // now compute the requested representation
     const types::global_dof_index n_global_parm_dofs
       = std::count_if (weight_mapping.begin(), weight_mapping.end(),
-                       std::bind2nd (std::not_equal_to<types::global_dof_index> (), numbers::invalid_dof_index));
+                       std_cxx11::bind (std::not_equal_to<types::global_dof_index>(), std_cxx11::_1, numbers::invalid_dof_index));
 
     // first construct the inverse mapping of weight_mapping
     std::vector<types::global_dof_index> inverse_weight_mapping (n_global_parm_dofs,

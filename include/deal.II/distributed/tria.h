@@ -698,11 +698,12 @@ namespace parallel
        * can be different than the coarsen and refine flags set by you). If it
        * is
        *
-       * - CELL_PERIST: the cell won't be refined/coarsened, but might be
-       * moved to a different processor - CELL_REFINE: this cell will be
-       * refined into 4/8 cells, you can not access the children (because they
-       * don't exist yet) - CELL_COARSEN: the children of this cell will be
-       * coarsened into the given cell (you can access the active children!)
+       * - CELL_PERSIST: the cell won't be refined/coarsened, but might be
+       * moved to a different processor
+       * - CELL_REFINE: this cell will be refined into 4/8 cells, you can not
+       * access the children (because they don't exist yet)
+       * - CELL_COARSEN: the children of this cell will be coarsened into the
+       * given cell (you can access the active children!)
        *
        * When unpacking the data with notify_ready_to_unpack() you can access
        * the children of the cell if the status is CELL_REFINE but not for
@@ -757,7 +758,8 @@ namespace parallel
       get_coarse_cell_to_p4est_tree_permutation() const;
 
       /**
-       * Join faces in the p4est forest for periodic boundary conditions. As a
+       * In addition to the action in the base class Triangulation, this function
+       * joins faces in the p4est forest for periodic boundary conditions. As a
        * result, each pair of faces will differ by at most one refinement
        * level and ghost neighbors will be available across these faces.
        *
@@ -773,7 +775,7 @@ namespace parallel
        * once is possible, but not recommended: The function destroys and
        * rebuilds the p4est forest each time it is called.
        */
-      void
+      virtual void
       add_periodicity
       (const std::vector<GridTools::PeriodicFacePair<cell_iterator> > &);
 
@@ -878,13 +880,6 @@ namespace parallel
       std::vector<types::global_dof_index> p4est_tree_to_coarse_cell_permutation;
 
       /**
-       * If add_periodicity() is called, this variable stores the given
-       * periodic face pairs on level 0 for later access during the
-       * identification of ghost cells for the multigrid hierarchy.
-       */
-      std::vector<GridTools::PeriodicFacePair<cell_iterator> > periodic_face_pairs_level_0;
-
-      /**
        * Return a pointer to the p4est tree that belongs to the given
        * dealii_coarse_cell_index()
        */
@@ -952,7 +947,7 @@ namespace parallel
        */
       void
       fill_level_vertices_with_ghost_neighbors
-      (const unsigned int level,
+      (const int level,
        std::map<unsigned int, std::set<dealii::types::subdomain_id> >
        &vertices_with_ghost_neighbors);
 
@@ -966,7 +961,7 @@ namespace parallel
        * Used by DoFHandler::Policy::ParallelDistributed.
        */
       std::vector<bool>
-      mark_locally_active_vertices_on_level(const unsigned int level) const;
+      mark_locally_active_vertices_on_level(const int level) const;
 
       template <int, int> friend class dealii::internal::DoFHandler::Policy::ParallelDistributed;
     };

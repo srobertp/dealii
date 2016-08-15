@@ -23,27 +23,35 @@
 DEAL_II_NAMESPACE_OPEN
 
 
+namespace
+{
+  std::vector<Point<1> >
+  get_QGaussLobatto_points (const unsigned int degree)
+  {
+    if (degree > 0)
+      return QGaussLobatto<1>(degree+1).get_points();
+    else
+      {
+        typedef FE_Q_Base<TensorProductPolynomials<1>, 1, 1> FEQ;
+        AssertThrow(false, FEQ::ExcFEQCannotHaveDegree0());
+      }
+    return std::vector<Point<1> >();
+  }
+}
+
+
 
 template <int dim, int spacedim>
 FE_Q<dim,spacedim>::FE_Q (const unsigned int degree)
   :
-  FE_Q_Base<TensorProductPolynomials<dim>, dim, spacedim> (
-    TensorProductPolynomials<dim>(Polynomials::LagrangeEquidistant::generate_complete_basis(degree)),
-    FiniteElementData<dim>(this->get_dpo_vector(degree),
-                           1, degree,
-                           FiniteElementData<dim>::H1),
-    std::vector<bool> (1, false))
+  FE_Q_Base<TensorProductPolynomials<dim>, dim, spacedim>
+  (TensorProductPolynomials<dim>(Polynomials::generate_complete_Lagrange_basis(get_QGaussLobatto_points(degree))),
+   FiniteElementData<dim>(this->get_dpo_vector(degree),
+                          1, degree,
+                          FiniteElementData<dim>::H1),
+   std::vector<bool> (1, false))
 {
-  Assert (degree > 0,
-          ExcMessage ("This element can only be used for polynomial degrees "
-                      "greater than zero. If you want an element of polynomial "
-                      "degree zero, then it cannot be continuous and you "
-                      "will want to use FE_DGQ<dim>(0)."));
-  std::vector<Point<1> > support_points_1d(degree+1);
-  for (unsigned int i=0; i<=degree; ++i)
-    support_points_1d[i][0] = static_cast<double>(i)/degree;
-
-  this->initialize(support_points_1d);
+  this->initialize(get_QGaussLobatto_points(degree));
 }
 
 
@@ -58,12 +66,6 @@ FE_Q<dim,spacedim>::FE_Q (const Quadrature<1> &points)
                            FiniteElementData<dim>::H1),
     std::vector<bool> (1, false))
 {
-  const unsigned int degree = points.size()-1;
-  (void)degree;
-  Assert (degree > 0,
-          ExcMessage ("This element can only be used for polynomial degrees "
-                      "at least zero"));
-
   this->initialize(points.get_points());
 }
 
@@ -73,7 +75,7 @@ template <int dim, int spacedim>
 std::string
 FE_Q<dim,spacedim>::get_name () const
 {
-  // note that the FETools::get_fe_from_name function depends on the
+  // note that the FETools::get_fe_by_name function depends on the
   // particular format of the string this function returns, so they have to be
   // kept in synch
 
@@ -95,9 +97,16 @@ FE_Q<dim,spacedim>::get_name () const
       }
 
   if (equidistant == true)
-    namebuf << "FE_Q<"
-            << Utilities::dim_string(dim,spacedim)
-            << ">(" << this->degree << ")";
+    {
+      if (this->degree > 2)
+        namebuf << "FE_Q<"
+                << Utilities::dim_string(dim,spacedim)
+                << ">(QIterated(QTrapez()," << this->degree << "))";
+      else
+        namebuf << "FE_Q<"
+                << Utilities::dim_string(dim,spacedim)
+                << ">(" << this->degree << ")";
+    }
   else
     {
       // Check whether the support points come from QGaussLobatto.
@@ -112,7 +121,7 @@ FE_Q<dim,spacedim>::get_name () const
       if (gauss_lobatto == true)
         namebuf << "FE_Q<"
                 << Utilities::dim_string(dim,spacedim)
-                << ">(QGaussLobatto(" << this->degree+1 << "))";
+                << ">(" << this->degree << ")";
       else
         namebuf << "FE_Q<"
                 << Utilities::dim_string(dim,spacedim)

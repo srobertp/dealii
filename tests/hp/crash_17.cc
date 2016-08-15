@@ -31,7 +31,7 @@ char logname[] = "output";
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/sparse_matrix.h>
-#include <deal.II/lac/compressed_sparsity_pattern.h>
+#include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/precondition.h>
 #include <deal.II/grid/tria.h>
@@ -131,7 +131,7 @@ LaplaceProblem<dim>::LaplaceProblem () :
 {
   for (unsigned int degree=2; degree<5; ++degree)
     {
-      fe_collection.push_back (FE_Q<dim>(degree));
+      fe_collection.push_back (FE_Q<dim>(QIterated<1>(QTrapez<1>(),degree)));
       quadrature_collection.push_back (QGauss<dim>(degree+2));
       face_quadrature_collection.push_back (QGauss<dim-1>(degree+2));
     }
@@ -179,8 +179,8 @@ void LaplaceProblem<dim>::setup_system ()
     }
   else
     {
-      CompressedSparsityPattern csp (dof_handler.n_dofs(),
-                                     dof_handler.n_dofs());
+      DynamicSparsityPattern csp (dof_handler.n_dofs(),
+                                  dof_handler.n_dofs());
       DoFTools::make_sparsity_pattern (dof_handler, csp);
 
       condense.reset();

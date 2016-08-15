@@ -43,6 +43,51 @@ FE_Bernstein<dim,spacedim>::FE_Bernstein (const unsigned int degree)
 {}
 
 
+
+template <int dim, int spacedim>
+void
+FE_Bernstein<dim,spacedim>::
+get_interpolation_matrix (const FiniteElement<dim,spacedim> &,
+                          FullMatrix<double> &) const
+{
+  // no interpolation possible. throw exception, as documentation says
+  typedef FiniteElement<dim,spacedim> FEE;
+  AssertThrow (false,
+               typename FEE::ExcInterpolationNotImplemented());
+}
+
+
+
+template <int dim, int spacedim>
+const FullMatrix<double> &
+FE_Bernstein<dim,spacedim>::get_restriction_matrix (const unsigned int,
+                                                    const RefinementCase<dim> &) const
+{
+  typedef FiniteElement<dim,spacedim> FEE;
+  AssertThrow (false,
+               typename FEE::ExcProjectionVoid());
+  // return dummy, nothing will happen because the base class FE_Q_Base
+  // implements lazy evaluation of those matrices
+  return this->restriction[0][0];
+}
+
+
+
+template <int dim, int spacedim>
+const FullMatrix<double> &
+FE_Bernstein<dim,spacedim>::get_prolongation_matrix (const unsigned int,
+                                                     const RefinementCase<dim> &) const
+{
+  typedef FiniteElement<dim,spacedim> FEE;
+  AssertThrow (false,
+               typename FEE::ExcEmbeddingVoid());
+  // return dummy, nothing will happen because the base class FE_Q_Base
+  // implements lazy evaluation of those matrices
+  return this->prolongation[0][0];
+}
+
+
+
 template <int dim, int spacedim>
 void
 FE_Bernstein<dim,spacedim>::
@@ -86,7 +131,7 @@ get_subface_interpolation_matrix (const FiniteElement<dim,spacedim> &x_source_fe
                ExcInterpolationNotImplemented ()));
 
       const Quadrature<dim-1>
-      quad_face_support(FE_Q<dim,spacedim>(source_fe->degree).get_unit_face_support_points ());
+      quad_face_support(FE_Q<dim,spacedim>(QIterated<1>(QTrapez<1>(),source_fe->degree)).get_unit_face_support_points ());
 
       // Rule of thumb for FP accuracy, that can be expected for a given
       // polynomial degree.  This value is used to cut off values close to
@@ -259,7 +304,7 @@ template <int dim, int spacedim>
 std::string
 FE_Bernstein<dim,spacedim>::get_name () const
 {
-  // note that the FETools::get_fe_from_name function depends on the
+  // note that the FETools::get_fe_by_name function depends on the
   // particular format of the string this function returns, so they have to be
   // kept in synch
 

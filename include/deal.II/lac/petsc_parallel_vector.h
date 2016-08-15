@@ -339,7 +339,7 @@ namespace PETScWrappers
                    const bool    omit_zeroing_entries = false);
 
       /**
-       * Reinit as a vector without ghost elements. See the constructor with
+       * Reinit as a vector with ghost elements. See the constructor with
        * same signature for more details.
        *
        * @see
@@ -581,6 +581,42 @@ namespace PETScWrappers
 #endif // DOXYGEN
   }
 }
+
+namespace internal
+{
+  namespace LinearOperator
+  {
+    template <typename> class ReinitHelper;
+
+    /**
+     * A helper class used internally in linear_operator.h. Specialization for
+     * PETScWrappers::MPI::Vector.
+     */
+    template<>
+    class ReinitHelper<PETScWrappers::MPI::Vector>
+    {
+    public:
+      template <typename Matrix>
+      static
+      void reinit_range_vector (const Matrix &matrix,
+                                PETScWrappers::MPI::Vector &v,
+                                bool omit_zeroing_entries)
+      {
+        v.reinit(matrix.locally_owned_range_indices(), matrix.get_mpi_communicator());
+      }
+
+      template <typename Matrix>
+      static
+      void reinit_domain_vector(const Matrix &matrix,
+                                PETScWrappers::MPI::Vector &v,
+                                bool omit_zeroing_entries)
+      {
+        v.reinit(matrix.locally_owned_domain_indices(), matrix.get_mpi_communicator());
+      }
+    };
+
+  } /* namespace LinearOperator */
+} /* namespace internal */
 
 /**@}*/
 

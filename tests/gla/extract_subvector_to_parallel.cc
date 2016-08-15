@@ -21,7 +21,7 @@
 #include "../tests.h"
 #include <deal.II/lac/generic_linear_algebra.h>
 #include <deal.II/base/index_set.h>
-#include <deal.II/lac/parallel_block_vector.h>
+#include <deal.II/lac/la_parallel_block_vector.h>
 #include <fstream>
 #include <iostream>
 #include <iomanip>
@@ -53,7 +53,7 @@ void test (VectorType &vector)
   std::vector<typename VectorType::value_type> values1 (indices.size());
   vector.extract_subvector_to (indices, values1);
   for (unsigned int j=0; j<vector.size()/2; ++j)
-    AssertThrow (values1[j] == 2*j, ExcInternalError());
+    AssertThrow (get_real_assert_zero_imag(values1[j]) == 2*j, ExcInternalError());
 
   // do the same with the version of the function that takes iterators
   std::vector<typename VectorType::value_type> values2 (indices.size());
@@ -61,7 +61,7 @@ void test (VectorType &vector)
                                indices.end(),
                                values2.begin());
   for (unsigned int j=0; j<vector.size()/2; ++j)
-    AssertThrow (values2[j] == 2*j, ExcInternalError());
+    AssertThrow (get_real_assert_zero_imag(values2[j]) == 2*j, ExcInternalError());
 
   // done
   if (myid==0)
@@ -87,9 +87,9 @@ int main (int argc, char **argv)
 
     {
       deallog.push("deal.II");
-      parallel::distributed::Vector<double> w(local, MPI_COMM_WORLD);
+      LinearAlgebra::distributed::Vector<double> w(local, MPI_COMM_WORLD);
       set (w);
-      parallel::distributed::Vector<double> v(local, dense_local, MPI_COMM_WORLD);
+      LinearAlgebra::distributed::Vector<double> v(local, dense_local, MPI_COMM_WORLD);
       v = w; // get copy of vector including ghost elements
       test (v);
       deallog.pop();
@@ -149,9 +149,9 @@ int main (int argc, char **argv)
 
     {
       deallog.push("deal.II");
-      parallel::distributed::BlockVector<double> w(partitioning, MPI_COMM_WORLD);
+      LinearAlgebra::distributed::BlockVector<double> w(partitioning, MPI_COMM_WORLD);
       set (w);
-      parallel::distributed::BlockVector<double> v(partitioning, dense_partitioning, MPI_COMM_WORLD);
+      LinearAlgebra::distributed::BlockVector<double> v(partitioning, dense_partitioning, MPI_COMM_WORLD);
       v = w; // get copy of vector including ghost elements
       test (v);
       deallog.pop();

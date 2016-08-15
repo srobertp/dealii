@@ -64,11 +64,6 @@
 // the same file as the FEValues class:
 #include <deal.II/fe/fe_values.h>
 
-// We need one more include from standard C++, which is necessary when we try
-// to find out the actual type behind a pointer to a base class. We will
-// explain this in slightly more detail below. The other two include files are
-// obvious then:
-#include <typeinfo>
 #include <fstream>
 #include <iostream>
 
@@ -171,10 +166,23 @@ namespace Step7
   // base class. Note that the gradient of a function in <code>dim</code>
   // space dimensions is a vector of size <code>dim</code>, i.e. a tensor of
   // rank 1 and dimension <code>dim</code>. As for so many other things, the
-  // library provides a suitable class for this.
+  // library provides a suitable class for this. One new thing about this
+  // class is that it explicitly uses the Tensor objects, which previously
+  // appeared as intermediate terms in step-3 and step-4. A tensor is a
+  // generalization of scalars (rank zero tensors), vectors (rank one
+  // tensors), and matrices (rank two tensors), as well as higher dimensional
+  // objects. The Tensor class requires two template arguments: the tensor
+  // rank and tensor dimension. For example, here we use tensors of rank one
+  // (vectors) with dimension <code>dim</code> (so they have <code>dim</code>
+  // entries.) While this is a bit less flexible than using Vector, the
+  // compiler can generate faster code when the length of the vector is known
+  // at compile time. Additionally, specifying a Tensor of rank one and
+  // dimension <code>dim</code> guarantees that the tensor will have the right
+  // shape (since it is built into the type of the object itself), so the
+  // compiler can catch most size-related mistakes for us.
   //
-  // Just as in previous examples, we are forced by the C++ language
-  // specification to declare a seemingly useless default constructor.
+  // Like in step-4, for compatibility with some compilers we explicitly
+  // declare the default constructor:
   template <int dim>
   class Solution : public Function<dim>,
     protected SolutionBase<dim>
@@ -867,22 +875,26 @@ namespace Step7
                                        difference_per_cell,
                                        QGauss<dim>(3),
                                        VectorTools::L2_norm);
-    const double L2_error = difference_per_cell.l2_norm();
+    const double L2_error = VectorTools::compute_global_error(triangulation,
+                                                              difference_per_cell,
+                                                              VectorTools::L2_norm);
 
     // By same procedure we get the H1 semi-norm. We re-use the
     // <code>difference_per_cell</code> vector since it is no longer used
     // after computing the <code>L2_error</code> variable above. The global
     // $H^1$ semi-norm error is then computed by taking the sum of squares
     // of the errors on each individual cell, and then the square root of
-    // it -- an operation that conveniently again coincides with taking
-    // the $l_2$ norm of the vector of error indicators.
+    // it -- an operation that is conveniently performed by
+    // VectorTools::compute_global_error.
     VectorTools::integrate_difference (dof_handler,
                                        solution,
                                        Solution<dim>(),
                                        difference_per_cell,
                                        QGauss<dim>(3),
                                        VectorTools::H1_seminorm);
-    const double H1_error = difference_per_cell.l2_norm();
+    const double H1_error = VectorTools::compute_global_error(triangulation,
+                                                              difference_per_cell,
+                                                              VectorTools::H1_seminorm);
 
     // Finally, we compute the maximum norm. Of course, we can't actually
     // compute the true maximum, but only the maximum at the quadrature
@@ -896,10 +908,8 @@ namespace Step7
     //
     // Using this special quadrature rule, we can then try to find the maximal
     // error on each cell. Finally, we compute the global L infinity error
-    // from the L infinite errors on each cell. Instead of summing squares, we
-    // now have to take the maximum value over all cell-wise entries, an
-    // operation that is conveniently done using the Vector::linfty()
-    // function:
+    // from the L infinity errors on each cell with a call to
+    // VectorTools::compute_global_error.
     const QTrapez<1>     q_trapez;
     const QIterated<dim> q_iterated (q_trapez, 5);
     VectorTools::integrate_difference (dof_handler,
@@ -908,7 +918,9 @@ namespace Step7
                                        difference_per_cell,
                                        q_iterated,
                                        VectorTools::Linfty_norm);
-    const double Linfty_error = difference_per_cell.linfty_norm();
+    const double Linfty_error = VectorTools::compute_global_error(triangulation,
+                                difference_per_cell,
+                                VectorTools::Linfty_norm);
 
     // After all these errors have been computed, we finally write some
     // output. In addition, we add the important data to the TableHandler by
@@ -1388,17 +1400,4 @@ int main ()
     }
 
   return 0;
-}
-
-
-// What comes here is basically just an annoyance that you can ignore if you
-// are not working on an AIX system: on this system, static member variables
-// are not instantiated automatically when their enclosing class is
-// instantiated. This leads to linker errors if these variables are not
-// explicitly instantiated. As said, this is, strictly C++ standards speaking,
-// not necessary, but it doesn't hurt either on other systems, and since it is
-// necessary to get things running on AIX, why not do it:
-namespace Step7
-{
-  template const double SolutionBase<2>::width;
 }

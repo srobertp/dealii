@@ -1,12 +1,12 @@
-//----------------------------  manifold_id_01.cc  ---------------------------
-//    Copyright (C) 2011 - 2016 by the mathLab team.
+//-------------------------------------------------------------------
+//    Copyright (C) 2016 by the deal.II authors.
 //
 //    This file is subject to LGPL and may not be  distributed
 //    without copyright and license information. Please refer
 //    to the file deal.II/doc/license.html for the  text  and
 //    further information on this license.
 //
-//----------------------------  flat_manifold_03.cc  ---------------------------
+//-------------------------------------------------------------------
 
 
 // Test periodicity of FlatManifold, where the
@@ -31,7 +31,7 @@ template <int dim, int spacedim>
 class MyFlatManifold : public ChartManifold<dim,spacedim,spacedim>
 {
 public:
-  MyFlatManifold (const Point<spacedim> &periodicity)
+  MyFlatManifold (const Tensor<1,spacedim> &periodicity)
     :
     ChartManifold<dim,spacedim,spacedim> (periodicity)
   {}
@@ -72,7 +72,7 @@ void test(unsigned int ref=1)
   deallog << "Testing dim=" << dim
           << ", spacedim="<< spacedim << std::endl;
 
-  Point<spacedim> periodicity;
+  Tensor<1,spacedim> periodicity;
   periodicity[0] = 5.0;
 
   MyFlatManifold<dim,spacedim> manifold(periodicity);

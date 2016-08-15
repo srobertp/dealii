@@ -23,8 +23,8 @@
 #include <deal.II/lac/sparse_matrix_ez.h>
 #include <deal.II/lac/chunk_sparse_matrix.h>
 #include <deal.II/lac/block_sparse_matrix_ez.h>
-#include <deal.II/lac/parallel_vector.h>
-#include <deal.II/lac/parallel_block_vector.h>
+#include <deal.II/lac/la_parallel_vector.h>
+#include <deal.II/lac/la_parallel_block_vector.h>
 #include <deal.II/lac/petsc_vector.h>
 #include <deal.II/lac/petsc_block_vector.h>
 #include <deal.II/lac/petsc_sparse_matrix.h>
@@ -1295,14 +1295,12 @@ PARALLEL_VECTOR_FUNCTIONS(TrilinosWrappers::MPI::BlockVector);
       bool                             , \
       internal::bool2type<true>) const
 
-MATRIX_FUNCTIONS(SparseMatrix<long double>);
 MATRIX_FUNCTIONS(SparseMatrix<double>);
 MATRIX_FUNCTIONS(SparseMatrix<float>);
 MATRIX_FUNCTIONS(FullMatrix<double>);
 MATRIX_FUNCTIONS(FullMatrix<float>);
 MATRIX_FUNCTIONS(FullMatrix<std::complex<double> >);
 MATRIX_FUNCTIONS(SparseMatrix<std::complex<double> >);
-MATRIX_FUNCTIONS(SparseMatrix<std::complex<long double> >);
 MATRIX_FUNCTIONS(SparseMatrix<std::complex<float> >);
 
 BLOCK_MATRIX_FUNCTIONS(BlockSparseMatrix<double>);
@@ -1420,10 +1418,8 @@ namespace internals
 
   SCRATCH_INITIALIZER(double,double);
   SCRATCH_INITIALIZER(float,float);
-  SCRATCH_INITIALIZER(long double,ldouble);
   SCRATCH_INITIALIZER(std::complex<double>,cdouble);
   SCRATCH_INITIALIZER(std::complex<float>,cfloat);
-  SCRATCH_INITIALIZER(std::complex<long double>,cldouble);
 #undef SCRATCH_INITIALIZER
 }
 

@@ -35,7 +35,7 @@ template <int dim, int spacedim>
 FE_TraceQ<dim,spacedim>::FE_TraceQ (const unsigned int degree)
   :
   FE_PolyFace<TensorProductPolynomials<dim-1>, dim, spacedim> (
-    TensorProductPolynomials<dim-1>(Polynomials::LagrangeEquidistant::generate_complete_basis(degree)),
+    TensorProductPolynomials<dim-1>(Polynomials::generate_complete_Lagrange_basis(QGaussLobatto<1>(degree+1).get_points())),
     FiniteElementData<dim>(get_dpo_vector(degree), 1, degree, FiniteElementData<dim>::L2),
     std::vector<bool>(1,true)),
   fe_q (degree)
@@ -68,7 +68,7 @@ template <int dim, int spacedim>
 std::string
 FE_TraceQ<dim,spacedim>::get_name () const
 {
-  // note that the FETools::get_fe_from_name function depends on the
+  // note that the FETools::get_fe_by_name function depends on the
   // particular format of the string this function returns, so they have to be
   // kept in synch
 
@@ -232,7 +232,7 @@ template <int spacedim>
 std::string
 FE_TraceQ<1,spacedim>::get_name () const
 {
-  // note that the FETools::get_fe_from_name function depends on the
+  // note that the FETools::get_fe_by_name function depends on the
   // particular format of the string this function returns, so they have to be
   // kept in synch
   std::ostringstream namebuf;

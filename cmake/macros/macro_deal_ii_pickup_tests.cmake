@@ -1,6 +1,6 @@
 ## ---------------------------------------------------------------------
 ##
-## Copyright (C) 2013 - 2015 by the deal.II authors
+## Copyright (C) 2013 - 2016 by the deal.II authors
 ##
 ## This file is part of the deal.II library.
 ##
@@ -178,14 +178,18 @@ MACRO(DEAL_II_PICKUP_TESTS)
       STRING(REGEX MATCH "([0-9]+(\\.[0-9]+)*)$" _version ${_match})
 
       #
-      # Valid feature?
+      # We support two variables: DEAL_II_WITH_<FEATURE> and DEAL_II_<FEATURE>
       #
-      IF(NOT DEFINED DEAL_II_WITH_${_feature})
-        MESSAGE(FATAL_ERROR "
-Invalid feature constraint \"${_match}\" in file
-\"${_comparison}\":
-The feature \"DEAL_II_${_feature}\" does not exist.\n"
-          )
+      SET(_variable "DEAL_II_WITH_${_feature}")
+      IF(NOT DEFINED ${_variable})
+        SET(_variable "DEAL_II_${_feature}")
+        IF(NOT DEFINED ${_variable})
+          #
+          # If a variable is undefined, assume that we cannot configure a
+          # given test
+          #
+          SET(_define_test FALSE)
+        ENDIF()
       ENDIF()
 
       #
@@ -201,8 +205,8 @@ Comparison operator \"=\" expected for boolean match.\n"
         ENDIF()
 
         # This is why I hate CMake :-/
-        IF( (DEAL_II_WITH_${_feature} AND NOT ${_boolean}) OR
-            (NOT DEAL_II_WITH_${_feature} AND ${_boolean}) )
+        IF( (${_variable} AND NOT ${_boolean}) OR
+            (NOT ${_variable} AND ${_boolean}) )
           SET(_define_test FALSE)
         ENDIF()
       ENDIF()

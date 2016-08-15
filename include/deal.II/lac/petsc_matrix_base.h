@@ -22,8 +22,9 @@
 #ifdef DEAL_II_WITH_PETSC
 
 #  include <deal.II/base/subscriptor.h>
-#  include <deal.II/lac/full_matrix.h>
 #  include <deal.II/lac/exceptions.h>
+#  include <deal.II/lac/full_matrix.h>
+#  include <deal.II/lac/petsc_compatibility.h>
 #  include <deal.II/lac/vector.h>
 
 #  include <petscmat.h>
@@ -701,12 +702,22 @@ namespace PETScWrappers
      */
     MatrixBase &operator /= (const PetscScalar factor);
 
+
     /**
      * Add the matrix @p other scaled by the factor @p factor to the current
      * matrix.
      */
+    MatrixBase &add (const PetscScalar factor,
+                     const MatrixBase &other);
+
+
+    /**
+     * Add the matrix @p other scaled by the factor @p factor to the current
+     * matrix.
+     * @deprecated Use the function with order of arguments reversed instead.
+     */
     MatrixBase &add (const MatrixBase &other,
-                     const PetscScalar factor);
+                     const PetscScalar factor) DEAL_II_DEPRECATED;
 
     /**
      * Matrix-vector multiplication: let <i>dst = M*src</i> with <i>M</i>
@@ -831,11 +842,7 @@ namespace PETScWrappers
      * Test whether a matrix is symmetric.  Default tolerance is
      * $1000\times32$-bit machine precision.
      */
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    PetscTruth
-#else
-    PetscBool
-#endif
+    PetscBooleanType
     is_symmetric (const double tolerance = 1.e-12);
 
     /**
@@ -843,11 +850,7 @@ namespace PETScWrappers
      * its transpose. Default tolerance is $1000\times32$-bit machine
      * precision.
      */
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    PetscTruth
-#else
-    PetscBool
-#endif
+    PetscBooleanType
     is_hermitian (const double tolerance = 1.e-12);
 
     /**
@@ -874,13 +877,6 @@ namespace PETScWrappers
      */
     std::size_t memory_consumption() const;
 
-    /**
-     * Exception
-     */
-    DeclException1 (ExcPETScError,
-                    int,
-                    << "An error with error number " << arg1
-                    << " occurred while calling a PETSc function");
     /**
      * Exception
      */

@@ -6,7 +6,7 @@
     <title>The deal.II Readme</title>
     <meta http-equiv="Content-Type" content="text/html;charset=utf-8"/>
     <link href="screen.css" rel="StyleSheet"/>
-    <meta name="copyright" content="Copyright (C) 1998 - 2015 by the deal.II Authors"/>
+    <meta name="copyright" content="Copyright (C) 1998 - 2016 by the deal.II Authors"/>
     <meta name="keywords" content="deal.II"/>
   </head>
 
@@ -393,16 +393,6 @@
       </li>
 
       <li>
-        <p>
-          <i>parameter_gui</i>: If you wish to compile and install the
-          <code>parameter_gui</code> tool discussed in the documentation
-	  of the <code>ParameterHandler</code> class, specify
-          <code>-DDEAL_II_COMPONENT_PARAMETER_GUI=ON</code>. Beware of the
-          fact that <code>parameter_gui</code> needs development packages for Qt.
-	</p>
-      </li>
-
-      <li>
   <p>
     <i>64bit indices</i>: By default, deal.II use unsigned int (32bit)
     indices for degrees of freedom, using
@@ -512,6 +502,20 @@
           non standard BLAS/LAPACK implementation, see the
 	  <a href="users/cmake.html#advanced">advanced
             setup</a> section in the CMake ReadME.
+	</p>
+      </dd>
+
+      <dt><a name="GSL"></a><a href="http://www.gnu.org/software/gsl/">GSL</a></dt>
+      <dd>
+	<p>
+	  The <a href="http://www.gnu.org/software/gsl/">GNU Scientific Library</a>
+	  provides a wide range of mathematical routines such as random number 
+	  generators, special functions and least-squares fitting.
+	  <a href="http://www.gnu.org/software/gsl/">GSL</a> should be
+	  readily packaged by most Linux distributions.  (Don't forget
+          to install a development version of the library).
+	  To use a self compiled version, specify
+	  <code>-DGSL_DIR=/path/to/gsl</code> on the command line.
 	</p>
       </dd>
 

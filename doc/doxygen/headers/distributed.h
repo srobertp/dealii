@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------
 //
-// Copyright (C) 2009 - 2015 by the deal.II authors
+// Copyright (C) 2009 - 2016 by the deal.II authors
 //
 // This file is part of the deal.II library.
 //
@@ -75,7 +75,8 @@
  * concise definition of many of the terms that are used here and in other
  * places of the library related to distributed computing.  The step-40
  * tutorial program shows an application of the classes and methods of this
- * namespace to the Laplace equation, while step-32 extends the step-31
+ * namespace to the Laplace equation, while step-55 does so for a vector-valued problem.
+ * step-32 extends the step-31
  * program to massively parallel computations and thereby explains the use of
  * the topic discussed here to more complicated applications.
  *
@@ -159,7 +160,7 @@
  *   proven that each subdomain consists of at most two disconnected
  *   pieces; see C. Burstedde, T. Isaac: "Morton curve segments produce
  *   no more than two distinct face-connected subdomains",
- *   <a href="http://arxiv.org/abs/1505.05055>arXiv 1505.05055</a>,
+ *   <a href="http://arxiv.org/abs/1505.05055">arXiv 1505.05055</a>,
  *   2015.)
  *
  *
@@ -296,7 +297,7 @@
  * owned by another processor.
  *
  * You can copy between vectors with and without ghost
- * elements (you can see this in step-40 and step-32) using operator=.
+ * elements (you can see this in step-40, step-55, and step-32) using operator=.
  *
  *
  * <h5>Sparsity patterns</h5>
@@ -362,7 +363,7 @@
  * DoFTools::extract_locally_active_dofs() . This is also affordable since the
  * set of locally relevant degrees of freedom is only marginally larger than
  * the set of locally active degrees of freedom. We choose this strategy in
- * both step-32 and step-40.
+ * step-32, step-40, and step-55.
  *
  *
  * <h4>Postprocessing</h4>
@@ -403,16 +404,14 @@
  * those degrees of freedom as well. In general, therefore, one needs access
  * to the solution values for all degrees of freedom that are <i>locally
  * relevant</i>. On the other hand, both of the packages we can use for
- * parallel linear algebra (PETSc and Trilinos) subdivide vectors into chunks
+ * parallel linear algebra (PETSc and Trilinos) as well as
+ * parallel::distributed::Vector subdivide vectors into chunks
  * each processor owns and chunks stored on other processors. To postprocess
  * stuff therefore means that we have to tell PETSc or Trilinos that it should
  * also import <i>ghost elements</i>, i.e. additional vector elements of the
- * solution vector other than the ones we store locally. Both the
- * PETScWrappers::MPI::Vector and TrilinosWrappers::MPI::Vector class support
- * specifying this information (see step-40 and step-32, respectively) through
- * the PETScWrappers::MPI::Vector::update_ghost_values() function or, in the
- * case of Trilinos, construction of a vector with an the locally relevant
- * degrees of freedom index set.
+ * solution vector other than the ones we own locally.
+ * For ghosted vectors, this can be achieved by using operator= with a
+ * distributed vector as argument.
  */
 
 

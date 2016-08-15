@@ -64,7 +64,7 @@
 #include <deal.II/lac/petsc_precondition.h>
 #include <deal.II/lac/petsc_solver.h>
 #include <deal.II/lac/petsc_vector.h>
-#include <deal.II/lac/compressed_simple_sparsity_pattern.h>
+#include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/sparsity_tools.h>
 #include <deal.II/lac/solver_control.h>
@@ -229,14 +229,14 @@ void test ()
     // zero. check this first for the locally owned elements...
     for (unsigned int i=0; i<handler.n_dofs(); ++i)
       if (locally_owned_dofs.is_element(i))
-        AssertThrow (vector(i) == 0,
+        AssertThrow (get_real_assert_zero_imag(vector(i)) == 0,
                      ExcInternalError());
     // ...end then also for the ghost elements
     for (unsigned int i=0; i<handler.n_dofs(); ++i)
       if (locally_relevant_dofs.is_element(i)
           &&
           !locally_owned_dofs.is_element(i))
-        AssertThrow (vector(i) == 0,
+        AssertThrow (get_real_assert_zero_imag(vector(i)) == 0,
                      ExcInternalError());
   }
 }

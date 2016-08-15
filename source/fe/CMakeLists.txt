@@ -42,6 +42,7 @@ SET(_src
   fe_rannacher_turek.cc
   fe_raviart_thomas.cc
   fe_raviart_thomas_nodal.cc
+  fe_series.cc
   fe_system.cc
   fe_tools.cc
   fe_tools_interpolate.cc
@@ -57,6 +58,7 @@ SET(_src
   mapping_q1_eulerian.cc
   mapping_q.cc
   mapping_q_eulerian.cc
+  mapping_manifold.cc
   )
 
 SET(_inst
@@ -101,6 +103,7 @@ SET(_inst
   mapping_q1.inst.in
   mapping_q_eulerian.inst.in
   mapping_q.inst.in
+  mapping_manifold.inst.in
   )
 
 FILE(GLOB _header

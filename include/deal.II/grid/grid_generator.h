@@ -128,14 +128,25 @@ namespace GridGenerator
    * Create a coordinate-parallel brick from the two diagonally opposite
    * corner points @p p1 and @p p2.
    *
-   * If the @p colorize flag is set, the @p boundary_ids of the surfaces are
+   * If the @p colorize flag is @p true, the @p boundary_ids of the boundary faces are
    * assigned, such that the lower one in @p x-direction is 0, the upper one
    * is 1. The indicators for the surfaces in @p y-direction are 2 and 3, the
-   * ones for @p z are 4 and 5. Additionally, material ids are assigned to the
+   * ones for @p z are 4 and 5. This corresponds to the numbers of faces
+   * of the unit square of cube as laid out in the documentation of the
+   * GeometryInfo class. Importantly, however, in 3d colorization does not
+   * set @p boundary_ids of <i>edges</i>, but only of <i>faces</i>, because
+   * each boundary edge is shared between two faces and it is not clear how
+   * the boundary id of an edge should be set in that case. This may later on
+   * lead to problems if one wants to assign boundary or manifold objects to
+   * parts of the boundary with certain boundary indicators since then the
+   * boundary object may not apply to the edges bounding the face it is meant
+   * to describe.
+   *
+   * Additionally, if @p colorize is @p true, material ids are assigned to the
    * cells according to the octant their center is in: being in the right half
-   * plane for any coordinate direction <i>x<sub>i</sub></i> adds
-   * 2<sup>i</sup>. For instance, the center point (1,-1,1) yields a material
-   * id 5.
+   * space for any coordinate direction <i>x<sub>i</sub></i> adds
+   * 2<sup>i</sup>. For instance, a cell with center point (1,-1,1) yields a material
+   * id 5, assuming that the center of the hyper rectangle lies at the origin.
    *
    * If @p dim < @p spacedim, this will create a @p dim dimensional object in
    * the first @p dim coordinate directions embedded into the @p spacedim
@@ -196,7 +207,8 @@ namespace GridGenerator
    *
    * @param p2 Second corner opposite to @p p1.
    *
-   * @param colorize Assign different boundary ids if set to true.
+   * @param colorize Assign different boundary ids if set to true. The
+   *   same comments apply as for the hyper_rectangle() function.
    *
    */
   template <int dim, int spacedim>
@@ -462,6 +474,22 @@ namespace GridGenerator
                      const double        radius = 1.);
 
   /**
+   * This class produces a hyper-ball intersected with the positive orthant
+   * relative to @p center, which contains three elements in 2d and four in 3d.
+   *
+   * The boundary indicators for the final triangulation are 0 for the curved
+   * boundary and 1 for the cut plane.
+   *
+   * The appropriate boundary class is HyperBallBoundary.
+   *
+   * @note The triangulation needs to be void upon calling this function.
+   */
+  template <int dim>
+  void quarter_hyper_ball (Triangulation<dim> &tria,
+                           const Point<dim>   &center = Point<dim>(),
+                           const double        radius = 1.);
+
+  /**
    * This class produces a half hyper-ball around @p center, which contains
    * four elements in 2d and 6 in 3d. The cut plane is perpendicular to the
    * <i>x</i>-axis.
@@ -572,9 +600,12 @@ namespace GridGenerator
    * Initialize the given triangulation with a hyper-L (in 2d or 3d)
    * consisting of exactly <tt>2^dim-1</tt> cells. It produces the hypercube
    * with the interval [<i>left,right</i>] without the hypercube made out of
-   * the interval [<i>(left+right)/2,right</i>] for each coordinate.  All
-   * faces will have boundary indicator 0. This function will create the
-   * classical L-shape in 2d and it will look like the following in 3d:
+   * the interval [<i>(left+right)/2,right</i>] for each coordinate. If the
+   * @p colorize flag is set, the @p boundary_ids of the surfaces are
+   * assigned, such that the left boundary is 0, and the others are set with
+   * growing number accordingly to the counterclockwise. Colorize option works
+   * only with 2-dimensional problem. This function will create the classical
+   * L-shape in 2d and it will look like the following in 3d:
    *
    * @image html hyper_l.png
    *
@@ -586,7 +617,8 @@ namespace GridGenerator
   template <int dim>
   void hyper_L (Triangulation<dim> &tria,
                 const double        left = -1.,
-                const double        right= 1.);
+                const double        right= 1.,
+                const bool          colorize = false);
 
   /**
    * Initialize the given Triangulation with a hypercube with a slit. In each
@@ -1135,6 +1167,12 @@ namespace GridGenerator
                   << "The vector of repetitions  must have "
                   << arg1 <<" elements.");
 
+  /**
+   * Exception for input that is not properly oriented.
+   */
+  DeclExceptionMsg (ExcInvalidInputOrientation,
+                    "The input to this function is oriented in a way that will"
+                    " cause all cells to have negative measure.");
   ///@}
 }
 

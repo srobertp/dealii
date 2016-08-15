@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------
 //
-// Copyright (C) 1999 - 2015 by the deal.II authors
+// Copyright (C) 1999 - 2016 by the deal.II authors
 //
 // This file is part of the deal.II library.
 //
@@ -1131,6 +1131,9 @@ namespace DoFTools
   std::vector<IndexSet>
   locally_owned_dofs_per_subdomain (const DoFHandlerType  &dof_handler)
   {
+    Assert(dof_handler.n_dofs() > 0,
+           ExcMessage("The given DoFHandler has no DoFs."));
+
     // If the Triangulation is distributed, the only thing we can usefully
     // ask is for its locally owned subdomain
     Assert ((dynamic_cast<const parallel::distributed::
@@ -1141,15 +1144,21 @@ namespace DoFTools
                         "related to a subdomain other than the locally owned one does "
                         "not make sense."));
 
-    //the following is a random process (flip of a coin), thus should be called once only.
+    // The following is a random process (flip of a coin), thus should be called once only.
     std::vector< dealii::types::subdomain_id > subdomain_association (dof_handler.n_dofs ());
     dealii::DoFTools::get_subdomain_association (dof_handler, subdomain_association);
 
+    // We have no MPI communicator with a serial computation and the subdomains
+    // can be set to arbitrary values. In case of a parallel Triangulation,
+    // we can check that we don't have more subdomains than processors.
+    // Note that max_element is well-defined because subdomain_association
+    // is non-empty (n_dofs()>0).
     const unsigned int n_subdomains
       = (dynamic_cast<const parallel::Triangulation<DoFHandlerType::dimension,DoFHandlerType::space_dimension> *>
          (&dof_handler.get_triangulation()) == 0
          ?
-         1
+         (1+*std::max_element (subdomain_association.begin (),
+                               subdomain_association.end ()))
          :
          Utilities::MPI::n_mpi_processes
          (dynamic_cast<const parallel::Triangulation<DoFHandlerType::dimension,DoFHandlerType::space_dimension> *>
@@ -2046,37 +2055,45 @@ namespace DoFTools
 
 
 
-  template <typename DoFHandlerType, class Sparsity>
-  void make_cell_patches(Sparsity                &block_list,
-                         const DoFHandlerType    &dof_handler,
-                         const unsigned int       level,
-                         const std::vector<bool> &selected_dofs,
-                         types::global_dof_index  offset)
+  template <int dim, int spacedim>
+  void make_cell_patches(SparsityPattern                &block_list,
+                         const DoFHandler<dim,spacedim> &dof_handler,
+                         const unsigned int             level,
+                         const std::vector<bool>        &selected_dofs,
+                         const types::global_dof_index  offset)
   {
-    typename DoFHandlerType::level_cell_iterator cell;
-    typename DoFHandlerType::level_cell_iterator endc = dof_handler.end(level);
+    typename DoFHandler<dim,spacedim>::level_cell_iterator cell;
+    typename DoFHandler<dim,spacedim>::level_cell_iterator endc = dof_handler.end(level);
     std::vector<types::global_dof_index> indices;
 
     unsigned int i=0;
-    for (cell=dof_handler.begin(level); cell != endc; ++i, ++cell)
-      {
-        indices.resize(cell->get_fe().dofs_per_cell);
-        cell->get_mg_dof_indices(indices);
 
-        if (selected_dofs.size()!=0)
-          AssertDimension(indices.size(), selected_dofs.size());
+    for (cell=dof_handler.begin(level); cell != endc; ++cell)
+      if (cell->is_locally_owned_on_level())
+        ++i;
+    block_list.reinit(i, dof_handler.n_dofs(), dof_handler.get_fe().dofs_per_cell);
+    i=0;
+    for (cell=dof_handler.begin(level); cell != endc; ++cell)
+      if (cell->is_locally_owned_on_level())
+        {
+          indices.resize(cell->get_fe().dofs_per_cell);
+          cell->get_mg_dof_indices(indices);
 
-        for (types::global_dof_index j=0; j<indices.size(); ++j)
-          {
-            if (selected_dofs.size() == 0)
-              block_list.add(i,indices[j]-offset);
-            else
-              {
-                if (selected_dofs[j])
-                  block_list.add(i,indices[j]-offset);
-              }
-          }
-      }
+          if (selected_dofs.size()!=0)
+            AssertDimension(indices.size(), selected_dofs.size());
+
+          for (types::global_dof_index j=0; j<indices.size(); ++j)
+            {
+              if (selected_dofs.size() == 0)
+                block_list.add(i,indices[j]-offset);
+              else
+                {
+                  if (selected_dofs[j])
+                    block_list.add(i,indices[j]-offset);
+                }
+            }
+          ++i;
+        }
   }
 
 
@@ -2186,16 +2203,39 @@ namespace DoFTools
       }
   }
 
-
+  template <typename DoFHandlerType>
+  std::vector<unsigned int>
+  make_vertex_patches (SparsityPattern      &block_list,
+                       const DoFHandlerType &dof_handler,
+                       const unsigned int    level,
+                       const bool            interior_only,
+                       const bool            boundary_patches,
+                       const bool            level_boundary_patches,
+                       const bool            single_cell_patches,
+                       const bool            invert_vertex_mapping)
+  {
+    const unsigned int n_blocks = dof_handler.get_fe().n_blocks();
+    BlockMask exclude_boundary_dofs = BlockMask(n_blocks,interior_only);
+    return make_vertex_patches(block_list,
+                               dof_handler,
+                               level,
+                               exclude_boundary_dofs,
+                               boundary_patches,
+                               level_boundary_patches,
+                               single_cell_patches,
+                               invert_vertex_mapping);
+  }
 
   template <typename DoFHandlerType>
-  void make_vertex_patches (SparsityPattern       &block_list,
-                            const DoFHandlerType &dof_handler,
-                            const unsigned int    level,
-                            const bool            interior_only,
-                            const bool            boundary_patches,
-                            const bool            level_boundary_patches,
-                            const bool            single_cell_patches)
+  std::vector<unsigned int>
+  make_vertex_patches (SparsityPattern      &block_list,
+                       const DoFHandlerType &dof_handler,
+                       const unsigned int    level,
+                       const BlockMask      &exclude_boundary_dofs,
+                       const bool            boundary_patches,
+                       const bool            level_boundary_patches,
+                       const bool            single_cell_patches,
+                       const bool            invert_vertex_mapping)
   {
     typename DoFHandlerType::level_cell_iterator cell;
     typename DoFHandlerType::level_cell_iterator endc = dof_handler.end(level);
@@ -2275,7 +2315,9 @@ namespace DoFTools
             if (block == numbers::invalid_unsigned_int)
               continue;
 
-            if (interior_only)
+            // Collect excluded dofs for some block(s) if boundary dofs
+            // for a block are decided to be excluded
+            if (exclude_boundary_dofs.size()==0 || exclude_boundary_dofs.n_selected_blocks() != 0)
               {
                 // Exclude degrees of freedom on faces opposite to the
                 // vertex
@@ -2288,7 +2330,11 @@ namespace DoFTools
                     const unsigned int a_face = GeometryInfo<DoFHandlerType::dimension>::vertex_to_face[v][d];
                     const unsigned int face = GeometryInfo<DoFHandlerType::dimension>::opposite_face[a_face];
                     for (unsigned int i=0; i<dpf; ++i)
-                      exclude[fe.face_to_cell_index(i,face)] = true;
+                      {
+                        // For each dof, get the block it is in and decide to exclude it or not
+                        if (exclude_boundary_dofs[fe.system_to_block_index(fe.face_to_cell_index(i,face)).first]==true)
+                          exclude[fe.face_to_cell_index(i,face)] = true;
+                      }
                   }
                 for (unsigned int j=0; j<indices.size(); ++j)
                   if (!exclude[j])
@@ -2301,8 +2347,21 @@ namespace DoFTools
               }
           }
       }
-  }
 
+    if (invert_vertex_mapping)
+      {
+        // Compress vertex mapping
+        unsigned int n_vertex_count = 0;
+        for (unsigned int vg = 0; vg < vertex_mapping.size(); ++vg)
+          if (vertex_mapping[vg] != numbers::invalid_unsigned_int)
+            vertex_mapping[n_vertex_count++] = vg;
+
+        // Now we reduce it to the part we actually want
+        vertex_mapping.resize(n_vertex_count);
+      }
+
+    return vertex_mapping;
+  }
 
 
   template <typename DoFHandlerType>

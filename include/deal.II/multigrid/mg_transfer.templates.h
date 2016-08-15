@@ -19,6 +19,7 @@
 
 #include <deal.II/lac/trilinos_vector.h>
 #include <deal.II/lac/sparse_matrix.h>
+#include <deal.II/lac/vector_view.h>
 #include <deal.II/grid/tria_iterator.h>
 #include <deal.II/fe/fe.h>
 #include <deal.II/multigrid/mg_base.h>
@@ -108,7 +109,7 @@ namespace
   void
   reinit_vector (const dealii::DoFHandler<dim,spacedim> &mg_dof,
                  const std::vector<unsigned int> &,
-                 MGLevelObject<parallel::distributed::Vector<number> > &v)
+                 MGLevelObject<LinearAlgebra::distributed::Vector<number> > &v)
   {
     const parallel::Triangulation<dim,spacedim> *tria =
       (dynamic_cast<const parallel::Triangulation<dim,spacedim>*>
@@ -197,6 +198,8 @@ MGLevelGlobalTransfer<VectorType>::copy_to_mg
  MGLevelObject<VectorType>      &dst,
  const InVector                 &src) const
 {
+  AssertIndexRange(dst.max_level(), mg_dof_handler.get_triangulation().n_global_levels());
+  AssertIndexRange(dst.min_level(), dst.max_level()+1);
   reinit_vector(mg_dof_handler, component_to_block_map, dst);
   bool first = true;
 #ifdef DEBUG_OUTPUT
@@ -213,7 +216,7 @@ MGLevelGlobalTransfer<VectorType>::copy_to_mg
       internal::copy_vector(copy_indices[dst.max_level()], src, dst[dst.max_level()]);
 
       // do the initial restriction
-      for (unsigned int level=mg_dof_handler.get_triangulation().n_global_levels()-1; level != 0; )
+      for (unsigned int level=dst.max_level(); level != dst.min_level(); )
         {
           --level;
           this->restrict_and_add (level+1, dst[level], dst[level+1]);
@@ -221,7 +224,7 @@ MGLevelGlobalTransfer<VectorType>::copy_to_mg
       return;
     }
 
-  for (unsigned int level=mg_dof_handler.get_triangulation().n_global_levels(); level != 0;)
+  for (unsigned int level=dst.max_level()+1; level != dst.min_level(); )
     {
       --level;
 #ifdef DEBUG_OUTPUT
@@ -271,6 +274,9 @@ MGLevelGlobalTransfer<VectorType>::copy_from_mg
  OutVector                       &dst,
  const MGLevelObject<VectorType> &src) const
 {
+  (void)mg_dof_handler;
+  AssertIndexRange(src.max_level(), mg_dof_handler.get_triangulation().n_global_levels());
+  AssertIndexRange(src.min_level(), src.max_level()+1);
   if (perform_plain_copy)
     {
       AssertDimension(dst.size(), src[src.max_level()].size());
@@ -282,7 +288,7 @@ MGLevelGlobalTransfer<VectorType>::copy_from_mg
   // attention, since they belong to the coarse level, but have fine level
   // basis functions
   dst = 0;
-  for (unsigned int level=0; level<mg_dof_handler.get_triangulation().n_global_levels(); ++level)
+  for (unsigned int level=src.min_level(); level<=src.max_level(); ++level)
     {
 #ifdef DEBUG_OUTPUT
       MPI_Barrier(MPI_COMM_WORLD);
@@ -325,14 +331,14 @@ template <typename VectorType>
 template <int dim, class OutVector, int spacedim>
 void
 MGLevelGlobalTransfer<VectorType>::copy_from_mg_add
-(const DoFHandler<dim,spacedim>  &mg_dof_handler,
+(const DoFHandler<dim,spacedim>  &/*mg_dof_handler*/,
  OutVector                       &dst,
  const MGLevelObject<VectorType> &src) const
 {
   // For non-DG: degrees of freedom in the refinement face may need special
   // attention, since they belong to the coarse level, but have fine level
   // basis functions
-  for (unsigned int level=0; level<mg_dof_handler.get_triangulation().n_global_levels(); ++level)
+  for (unsigned int level=src.min_level(); level<=src.max_level(); ++level)
     {
       typedef std::vector<std::pair<types::global_dof_index, types::global_dof_index> >::const_iterator dof_pair_iterator;
       const VectorType &src_level = src[level];
@@ -363,16 +369,18 @@ set_component_to_block_map (const std::vector<unsigned int> &map)
 
 
 
-/* --------- MGLevelGlobalTransfer<parallel::distributed::Vector> ------- */
+/* --------- MGLevelGlobalTransfer<LinearAlgebra::distributed::Vector> ------- */
 
 template <typename Number>
 template <int dim, typename Number2, int spacedim>
 void
-MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_to_mg
+MGLevelGlobalTransfer<LinearAlgebra::distributed::Vector<Number> >::copy_to_mg
 (const DoFHandler<dim,spacedim>                        &mg_dof_handler,
- MGLevelObject<parallel::distributed::Vector<Number> > &dst,
- const parallel::distributed::Vector<Number2>          &src) const
+ MGLevelObject<LinearAlgebra::distributed::Vector<Number> > &dst,
+ const LinearAlgebra::distributed::Vector<Number2>          &src) const
 {
+  AssertIndexRange(dst.max_level(), mg_dof_handler.get_triangulation().n_global_levels());
+  AssertIndexRange(dst.min_level(), dst.max_level()+1);
   reinit_vector(mg_dof_handler, component_to_block_map, dst);
   bool first = true;
 
@@ -386,7 +394,7 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_to_mg
       static_cast<Vector<Number> &>(dst_view) = static_cast<Vector<Number2> &>(src_view);
 
       // do the initial restriction
-      for (unsigned int level=mg_dof_handler.get_triangulation().n_global_levels()-1; level != 0; )
+      for (unsigned int level=dst.max_level(); level != dst.min_level(); )
         {
           --level;
           this->restrict_and_add (level+1, dst[level], dst[level+1]);
@@ -403,12 +411,12 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_to_mg
   ghosted_global_vector = src;
   ghosted_global_vector.update_ghost_values();
 
-  for (unsigned int level=mg_dof_handler.get_triangulation().n_global_levels(); level != 0;)
+  for (unsigned int level=dst.max_level()+1; level != dst.min_level();)
     {
       --level;
 
       typedef std::vector<std::pair<unsigned int, unsigned int> >::const_iterator dof_pair_iterator;
-      parallel::distributed::Vector<Number> &dst_level = dst[level];
+      LinearAlgebra::distributed::Vector<Number> &dst_level = dst[level];
 
       // first copy local unknowns
       for (dof_pair_iterator i = copy_indices[level].begin();
@@ -437,11 +445,14 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_to_mg
 template <typename Number>
 template <int dim, typename Number2, int spacedim>
 void
-MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_from_mg
+MGLevelGlobalTransfer<LinearAlgebra::distributed::Vector<Number> >::copy_from_mg
 (const DoFHandler<dim,spacedim>                              &mg_dof_handler,
- parallel::distributed::Vector<Number2>                      &dst,
- const MGLevelObject<parallel::distributed::Vector<Number> > &src) const
+ LinearAlgebra::distributed::Vector<Number2>                      &dst,
+ const MGLevelObject<LinearAlgebra::distributed::Vector<Number> > &src) const
 {
+  (void)mg_dof_handler;
+  AssertIndexRange(src.max_level(), mg_dof_handler.get_triangulation().n_global_levels());
+  AssertIndexRange(src.min_level(), src.max_level()+1);
   if (perform_plain_copy)
     {
       // In this case, we can simply copy the local range (in parallel by
@@ -460,7 +471,7 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_from_mg
   // basis functions
 
   dst = 0;
-  for (unsigned int level=0; level<mg_dof_handler.get_triangulation().n_global_levels(); ++level)
+  for (unsigned int level=src.min_level(); level<=src.max_level(); ++level)
     {
       typedef std::vector<std::pair<unsigned int, unsigned int> >::const_iterator dof_pair_iterator;
 
@@ -471,7 +482,7 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_from_mg
 
       // the first time around, we copy the source vector to the temporary
       // vector that we hold for the purpose of data exchange
-      parallel::distributed::Vector<Number> &ghosted_vector =
+      LinearAlgebra::distributed::Vector<Number> &ghosted_vector =
         ghosted_level_vector[level];
       ghosted_vector = src[level];
       ghosted_vector.update_ghost_values();
@@ -495,17 +506,17 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_from_mg
 template <typename Number>
 template <int dim, typename Number2, int spacedim>
 void
-MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_from_mg_add
-(const DoFHandler<dim,spacedim>                              &mg_dof_handler,
- parallel::distributed::Vector<Number2>                      &dst,
- const MGLevelObject<parallel::distributed::Vector<Number> > &src) const
+MGLevelGlobalTransfer<LinearAlgebra::distributed::Vector<Number> >::copy_from_mg_add
+(const DoFHandler<dim,spacedim>                              &/*mg_dof_handler*/,
+ LinearAlgebra::distributed::Vector<Number2>                      &dst,
+ const MGLevelObject<LinearAlgebra::distributed::Vector<Number> > &src) const
 {
   // For non-DG: degrees of freedom in the refinement face may need special
   // attention, since they belong to the coarse level, but have fine level
   // basis functions
 
   dst.zero_out_ghosts();
-  for (unsigned int level=0; level<mg_dof_handler.get_triangulation().n_global_levels(); ++level)
+  for (unsigned int level=src.min_level(); level<=src.max_level(); ++level)
     {
       typedef std::vector<std::pair<unsigned int, unsigned int> >::const_iterator dof_pair_iterator;
 
@@ -516,7 +527,7 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_from_mg_add
 
       // the first time around, we copy the source vector to the temporary
       // vector that we hold for the purpose of data exchange
-      parallel::distributed::Vector<Number> &ghosted_vector =
+      LinearAlgebra::distributed::Vector<Number> &ghosted_vector =
         ghosted_level_vector[level];
       ghosted_vector = src[level];
       ghosted_vector.update_ghost_values();
@@ -539,7 +550,7 @@ MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::copy_from_mg_add
 
 template <typename Number>
 void
-MGLevelGlobalTransfer<parallel::distributed::Vector<Number> >::
+MGLevelGlobalTransfer<LinearAlgebra::distributed::Vector<Number> >::
 set_component_to_block_map (const std::vector<unsigned int> &map)
 {
   component_to_block_map = map;

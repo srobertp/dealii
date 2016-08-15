@@ -61,6 +61,13 @@ template <typename> class BlockVector;
 
 template <typename> class VectorView;
 
+namespace parallel
+{
+  namespace internal
+  {
+    class TBBPartitioner;
+  }
+}
 
 
 
@@ -97,11 +104,9 @@ struct VectorOperation
  * suitable for numerical computations.
  *
  * @note Instantiations for this template are provided for <tt>@<float@>,
- * @<double@>, @<long double@>, @<std::complex@<float@>@>,
- * @<std::complex@<double@>@>, @<std::complex@<long double@>@></tt>; others
- * can be generated in application programs (see the section on
- * @ref Instantiations
- * in the manual).
+ * @<double@>, @<std::complex@<float@>@>, @<std::complex@<double@>@></tt>;
+ * others can be generated in application programs (see the section on
+ * @ref Instantiations in the manual).
  *
  * @author Guido Kanschat, Franz-Theo Suttmeier, Wolfgang Bangerth
  */
@@ -200,7 +205,7 @@ public:
    * vector class. This copy constructor is only available if PETSc was
    * detected during configuration time.
    */
-  Vector (const PETScWrappers::Vector &v);
+  explicit Vector (const PETScWrappers::Vector &v);
 
   /**
    * Another copy constructor: copy the values from a parallel PETSc wrapper
@@ -212,7 +217,7 @@ public:
    * possible for only one process to obtain a copy of a parallel vector while
    * the other jobs do something else.
    */
-  Vector (const PETScWrappers::MPI::Vector &v);
+  explicit Vector (const PETScWrappers::MPI::Vector &v);
 #endif
 
 #ifdef DEAL_II_WITH_TRILINOS
@@ -227,14 +232,14 @@ public:
    * vector while the other jobs do something else. This call will rather
    * result in a copy of the vector on all processors.
    */
-  Vector (const TrilinosWrappers::MPI::Vector &v);
+  explicit Vector (const TrilinosWrappers::MPI::Vector &v);
 
   /**
    * Another copy constructor: copy the values from a localized Trilinos
    * wrapper vector. This copy constructor is only available if Trilinos was
    * detected during configuration time.
    */
-  Vector (const TrilinosWrappers::Vector &v);
+  explicit Vector (const TrilinosWrappers::Vector &v);
 #endif
 
   /**
@@ -347,8 +352,9 @@ public:
 
 #ifdef DEAL_II_WITH_CXX11
   /**
-   * Move the given vector. This operator replaces the present vector with @p
-   * v by efficiently swapping the internal data structures.
+   * Move the given vector. This operator replaces the present vector with
+   * the internal data of the vector @p v and resets @p v to the state it would
+   * have after being newly default-constructed.
    *
    * @note This operator is only available if deal.II is configured with C++11
    * support.
@@ -984,6 +990,12 @@ protected:
   Number *val;
 
   /**
+   * For parallel loops with TBB, this member variable stores the affinity
+   * information of loops.
+   */
+  mutable std_cxx11::shared_ptr<parallel::internal::TBBPartitioner> thread_loop_partitioner;
+
+  /**
    * Make all other vector types friends.
    */
   template <typename Number2> friend class Vector;
@@ -1026,7 +1038,9 @@ Vector<Number>::Vector ()
   vec_size(0),
   max_vec_size(0),
   val(0)
-{}
+{
+  reinit(0);
+}
 
 
 
@@ -1068,82 +1082,6 @@ Vector<Number>::~Vector ()
       deallocate();
       val=0;
     }
-}
-
-
-
-template <typename Number>
-inline
-void Vector<Number>::reinit (const size_type n,
-                             const bool omit_zeroing_entries)
-{
-  if (n==0)
-    {
-      if (val) deallocate();
-      val = 0;
-      max_vec_size = vec_size = 0;
-      return;
-    };
-
-  if (n>max_vec_size)
-    {
-      if (val) deallocate();
-      max_vec_size = n;
-      allocate();
-    };
-  vec_size = n;
-  if (omit_zeroing_entries == false)
-    *this = static_cast<Number>(0);
-}
-
-
-
-// declare function that is implemented in vector.templates.h
-namespace internal
-{
-  namespace Vector
-  {
-    template <typename T, typename U>
-    void copy_vector (const dealii::Vector<T> &src,
-                      dealii::Vector<U>       &dst);
-  }
-}
-
-
-
-template <typename Number>
-inline
-Vector<Number> &
-Vector<Number>::operator= (const Vector<Number> &v)
-{
-  dealii::internal::Vector::copy_vector (v, *this);
-  return *this;
-}
-
-
-
-#ifdef DEAL_II_WITH_CXX11
-template <typename Number>
-inline
-Vector<Number> &
-Vector<Number>::operator= (Vector<Number> &&v)
-{
-  swap(v);
-
-  return *this;
-}
-#endif
-
-
-
-template <typename Number>
-template <typename Number2>
-inline
-Vector<Number> &
-Vector<Number>::operator= (const Vector<Number2> &v)
-{
-  internal::Vector::copy_vector (v, *this);
-  return *this;
 }
 
 

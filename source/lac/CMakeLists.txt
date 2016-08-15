@@ -28,9 +28,10 @@ SET(_src
   full_matrix.cc
   lapack_full_matrix.cc
   la_vector.cc
+  la_parallel_vector.cc
+  la_parallel_block_vector.cc
   matrix_lib.cc
   matrix_out.cc
-  parallel_vector.cc
   precondition_block.cc
   precondition_block_ez.cc
   relaxation_block.cc
@@ -62,7 +63,8 @@ SET(_inst
   full_matrix.inst.in
   lapack_full_matrix.inst.in
   la_vector.inst.in
-  parallel_vector.inst.in
+  la_parallel_vector.inst.in
+  la_parallel_block_vector.inst.in
   precondition_block.inst.in
   relaxation_block.inst.in
   read_write_vector.inst.in
@@ -111,6 +113,8 @@ IF(DEAL_II_WITH_TRILINOS)
     ${_src}
     trilinos_block_sparse_matrix.cc
     trilinos_block_vector.cc
+    trilinos_epetra_communication_pattern.cc
+    trilinos_epetra_vector.cc
     trilinos_parallel_block_vector.cc
     trilinos_precondition.cc
     trilinos_precondition_ml.cc

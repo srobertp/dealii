@@ -46,7 +46,7 @@ void test ()
     local_relevant.add_range(5,10);
   local_relevant.add_range(0,1);
 
-  CompressedSimpleSparsityPattern csp (local_relevant);
+  DynamicSparsityPattern csp (local_relevant);
 
   for (unsigned int i=0; i<10; ++i)
     if (local_relevant.is_element(i))
@@ -74,8 +74,8 @@ void test ()
   // check local values
   if (myid==0)
     {
-      deallog << "1,1 : " << mat(1,1) << std::endl;
-      deallog << "0,1 : " << mat(0,1) << std::endl;
+      deallog << "1,1 : " << get_real_assert_zero_imag(mat(1,1)) << std::endl;
+      deallog << "0,1 : " << get_real_assert_zero_imag(mat(0,1)) << std::endl;
     }
 
   // done

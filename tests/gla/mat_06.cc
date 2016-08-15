@@ -44,7 +44,7 @@ void test ()
   IndexSet local_relevant= local_active;
   local_relevant.add_range(0,1);
 
-  CompressedSimpleSparsityPattern csp (local_relevant);
+  DynamicSparsityPattern csp (local_relevant);
 
   for (unsigned int i=0; i<2*numproc; ++i)
     if (local_relevant.is_element(i))
@@ -71,17 +71,17 @@ void test ()
 
   deallog << "l1-norm: " << mat.l1_norm() << std::endl;
   if (myid==0)
-    deallog << "mat(0,1): " << mat(0,1) << std::endl;
+    deallog << "mat(0,1): " << get_real_assert_zero_imag(mat(0,1)) << std::endl;
 
   mat.copy_from(mat);
   deallog << "l1-norm: " << mat.l1_norm() << std::endl;
   if (myid==0)
-    deallog << "mat(0,1): " << mat(0,1) << std::endl;
+    deallog << "mat(0,1): " << get_real_assert_zero_imag(mat(0,1)) << std::endl;
 
   mat.reinit(mat);
   deallog << "l1-norm: " << mat.l1_norm() << std::endl;
   if (myid==0)
-    deallog << "mat(0,1): " << mat(0,1) << std::endl;
+    deallog << "mat(0,1): " << get_real_assert_zero_imag(mat(0,1)) << std::endl;
 
   if (myid==0)
     deallog << "OK" << std::endl;

@@ -23,8 +23,8 @@
 #include <deal.II/base/qprojector.h>
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/block_vector.h>
-#include <deal.II/lac/parallel_vector.h>
-#include <deal.II/lac/parallel_block_vector.h>
+#include <deal.II/lac/la_parallel_vector.h>
+#include <deal.II/lac/la_parallel_block_vector.h>
 #include <deal.II/lac/petsc_vector.h>
 #include <deal.II/lac/petsc_block_vector.h>
 #include <deal.II/lac/trilinos_vector.h>
@@ -80,14 +80,22 @@ namespace VectorTools
   void interpolate (const Mapping<dim,spacedim>        &mapping,
                     const DoFHandlerType<dim,spacedim> &dof,
                     const Function<spacedim, typename VectorType::value_type>           &function,
-                    VectorType                         &vec)
+                    VectorType                         &vec,
+                    const ComponentMask                &component_mask)
   {
     typedef typename VectorType::value_type number;
+    Assert (component_mask.represents_n_components(dof.get_fe().n_components()),
+            ExcMessage("The number of components in the mask has to be either "
+                       "zero or equal to the number of components in the finite "
+                       "element.") );
+
     Assert (vec.size() == dof.n_dofs(),
             ExcDimensionMismatch (vec.size(), dof.n_dofs()));
     Assert (dof.get_fe().n_components() == function.n_components,
             ExcDimensionMismatch(dof.get_fe().n_components(),
                                  function.n_components));
+    Assert (component_mask.n_selected_components(dof.get_fe().n_components()) > 0,
+            ComponentMask::ExcNoComponentSelected());
 
     const hp::FECollection<dim,spacedim> fe (dof.get_fe());
     const unsigned int          n_components = fe.n_components();
@@ -107,38 +115,29 @@ namespace VectorTools
     // vectorfunction multiple times at the
     // same point on a cell.
     //
-    // note that we have to set up all of the
-    // following arrays for each of the
-    // elements in the FECollection (which
-    // means only once if this is for a regular
-    // DoFHandler)
-    std::vector<std::vector<Point<dim> > > unit_support_points (fe.size());
+    // First check that the desired components are interpolating.
     for (unsigned int fe_index=0; fe_index<fe.size(); ++fe_index)
       {
-        unit_support_points[fe_index] = fe[fe_index].get_unit_support_points();
-        Assert ((unit_support_points[fe_index].size() != 0)||(fe[fe_index].dofs_per_cell == 0),
-                ExcNonInterpolatingFE());
+        for (unsigned int component_index = 0; component_index < n_components; ++component_index)
+          {
+            if (component_mask[component_index] == true)
+              {
+                Assert ((fe[fe_index].base_element(fe[fe_index].component_to_base_index(component_index).first).has_support_points()) ||
+                        (fe[fe_index].base_element(fe[fe_index].component_to_base_index(component_index).first).dofs_per_cell == 0),
+                        ExcNonInterpolatingFE());
+              }
+          }
       }
 
+    // Find the support points on a cell that are mentioned multiple times, and
+    // only add each once.  Each multiple point gets to know the dof index of
+    // its representative point by the dof_to_rep_dof_table.
 
-    // Find the support points on a cell that
-    // are mentioned multiple times in
-    // unit_support_points.  Mark the first
-    // representative of each support point
-    // mentioned multiple times by appending
-    // its dof index to dofs_of_rep_points.
-    // Each multiple point gets to know the dof
-    // index of its representative point by the
-    // dof_to_rep_dof_table.
-
-    // the following vector collects all dofs i,
-    // 0<=i<fe.dofs_per_cell, for that
-    // unit_support_points[i]
-    // is a representative one. i.e.
-    // the following vector collects all rep dofs.
-    // the position of a rep dof within this vector
-    // is called rep index.
-    std::vector<std::vector<types::global_dof_index> > dofs_of_rep_points(fe.size());
+    // the following vector collects all unit support points p[i],
+    // 0<=i<fe.dofs_per_cell, for which unit_support_point(i) is unique
+    // (representative). The position of a support point within this vector is
+    // called the rep index.
+    std::vector<std::vector<Point<dim> > > rep_unit_support_points (fe.size());
     // the following table converts a dof i
     // to the rep index.
     std::vector<std::vector<types::global_dof_index> > dof_to_rep_index_table(fe.size());
@@ -149,40 +148,49 @@ namespace VectorTools
       {
         for (unsigned int i=0; i<fe[fe_index].dofs_per_cell; ++i)
           {
-            bool representative=true;
-            // the following loop is looped
-            // the other way round to get
-            // the minimal effort of
-            // O(fe.dofs_per_cell) for multiple
-            // support points that are placed
-            // one after the other.
-            for (unsigned int j=dofs_of_rep_points[fe_index].size(); j>0; --j)
-              if (unit_support_points[fe_index][i]
-                  == unit_support_points[fe_index][dofs_of_rep_points[fe_index][j-1]])
-                {
-                  dof_to_rep_index_table[fe_index].push_back(j-1);
-                  representative=false;
-                  break;
-                }
-
-            if (representative)
+            const unsigned int component
+              = fe[fe_index].system_to_component_index(i).first;
+            if (component_mask[component] == true)
               {
-                dof_to_rep_index_table[fe_index].push_back(dofs_of_rep_points[fe_index].size());
-                dofs_of_rep_points[fe_index].push_back(i);
-                ++n_rep_points[fe_index];
+                const Point<dim> dof_support_point = fe[fe_index].unit_support_point(i);
+
+                bool representative=true;
+                // the following loop is looped
+                // the other way round to get
+                // the minimal effort of
+                // O(fe.dofs_per_cell) for multiple
+                // support points that are placed
+                // one after the other.
+                for (unsigned int j=rep_unit_support_points[fe_index].size(); j>0; --j)
+                  if (dof_support_point
+                      == rep_unit_support_points[fe_index][j-1])
+                    {
+                      dof_to_rep_index_table[fe_index].push_back(j-1);
+                      representative=false;
+                      break;
+                    }
+
+                if (representative)
+                  {
+                    dof_to_rep_index_table[fe_index].push_back(rep_unit_support_points[fe_index].size());
+                    rep_unit_support_points[fe_index].push_back(dof_support_point);
+                    ++n_rep_points[fe_index];
+                  }
+              }
+            else
+              {
+                // If correct component not to be interpolated, append invalid index to in table
+                dof_to_rep_index_table[fe_index].push_back(numbers::invalid_dof_index);
               }
           }
 
-        Assert(dofs_of_rep_points[fe_index].size()==n_rep_points[fe_index],
+        Assert(rep_unit_support_points[fe_index].size()==n_rep_points[fe_index],
                ExcInternalError());
         Assert(dof_to_rep_index_table[fe_index].size()==fe[fe_index].dofs_per_cell,
                ExcInternalError());
       }
 
-    const unsigned int max_rep_points = *std::max_element (n_rep_points.begin(),
-                                                           n_rep_points.end());
     std::vector<types::global_dof_index> dofs_on_cell (fe.max_dofs_per_cell());
-    std::vector<Point<spacedim> >  rep_points (max_rep_points);
 
     // get space for the values of the
     // function at the rep support points.
@@ -197,7 +205,7 @@ namespace VectorTools
     // to feed it into FEValues
     hp::QCollection<dim> support_quadrature;
     for (unsigned int fe_index=0; fe_index<fe.size(); ++fe_index)
-      support_quadrature.push_back (Quadrature<dim>(unit_support_points[fe_index]));
+      support_quadrature.push_back (Quadrature<dim>(rep_unit_support_points[fe_index]));
 
     // Transformed support points are computed by
     // FEValues
@@ -216,14 +224,8 @@ namespace VectorTools
               // get location of finite element
               // support_points
               fe_values.reinit(cell);
-              const std::vector<Point<spacedim> > &support_points =
+              const std::vector<Point<spacedim> > &rep_support_points =
                 fe_values.get_present_fe_values().get_quadrature_points();
-
-              // pick out the representative
-              // support points
-              rep_points.resize (dofs_of_rep_points[fe_index].size());
-              for (unsigned int j=0; j<dofs_of_rep_points[fe_index].size(); ++j)
-                rep_points[j] = support_points[dofs_of_rep_points[fe_index][j]];
 
               // get indices of the dofs on this cell
               dofs_on_cell.resize (fe[fe_index].dofs_per_cell);
@@ -238,7 +240,7 @@ namespace VectorTools
                   function_values_system[fe_index]
                   .resize (n_rep_points[fe_index],
                            Vector<number> (fe[fe_index].n_components()));
-                  function.vector_value_list (rep_points,
+                  function.vector_value_list (rep_support_points,
                                               function_values_system[fe_index]);
                   // distribute the function
                   // values to the global
@@ -247,9 +249,12 @@ namespace VectorTools
                     {
                       const unsigned int component
                         = fe[fe_index].system_to_component_index(i).first;
-                      const unsigned int rep_dof=dof_to_rep_index_table[fe_index][i];
-                      vec(dofs_on_cell[i])
-                        = function_values_system[fe_index][rep_dof](component);
+                      if (component_mask[component] == true)
+                        {
+                          const unsigned int rep_dof=dof_to_rep_index_table[fe_index][i];
+                          vec(dofs_on_cell[i])
+                            = function_values_system[fe_index][rep_dof](component);
+                        }
                     }
                 }
               else
@@ -258,7 +263,7 @@ namespace VectorTools
                   // which is the only component
                   // in the function anyway
                   function_values_scalar[fe_index].resize (n_rep_points[fe_index]);
-                  function.value_list (rep_points,
+                  function.value_list (rep_support_points,
                                        function_values_scalar[fe_index],
                                        0);
                   // distribute the function
@@ -277,13 +282,15 @@ namespace VectorTools
   template <typename VectorType, typename DoFHandlerType>
   void interpolate (const DoFHandlerType                            &dof,
                     const Function<DoFHandlerType::space_dimension,typename VectorType::value_type> &function,
-                    VectorType                                      &vec)
+                    VectorType                                      &vec,
+                    const ComponentMask                             &component_mask)
   {
     interpolate(StaticMappingQ1<DoFHandlerType::dimension,
                 DoFHandlerType::space_dimension>::mapping,
                 dof,
                 function,
-                vec);
+                vec,
+                component_mask);
   }
 
 
@@ -1677,97 +1684,7 @@ namespace VectorTools
 
   namespace
   {
-    // interpolate boundary values in
-    // 1d. in higher dimensions, we
-    // use FEValues to figure out
-    // what to do on faces, but in 1d
-    // faces are points and it is far
-    // easier to simply work on
-    // individual vertices
     template <typename number, typename DoFHandlerType, template <int,int> class M_or_MC>
-    static inline
-    void do_interpolate_boundary_values
-    (const M_or_MC<DoFHandlerType::dimension, DoFHandlerType::space_dimension> &,
-     const DoFHandlerType                                                                        &dof,
-     const std::map<types::boundary_id, const Function<DoFHandlerType::space_dimension,number>*> &function_map,
-     std::map<types::global_dof_index,number>                                                    &boundary_values,
-     const ComponentMask                                                                         &component_mask,
-     const dealii::internal::int2type<1>)
-    {
-      const unsigned int dim = DoFHandlerType::dimension;
-      const unsigned int spacedim = DoFHandlerType::space_dimension;
-
-      Assert (component_mask.represents_n_components(dof.get_fe().n_components()),
-              ExcMessage ("The number of components in the mask has to be either "
-                          "zero or equal to the number of components in the finite "
-                          "element."));
-
-      // if for whatever reason we were
-      // passed an empty map, return
-      // immediately
-      if (function_map.size() == 0)
-        return;
-
-      for (typename DoFHandlerType::active_cell_iterator cell = dof.begin_active();
-           cell != dof.end(); ++cell)
-        for (unsigned int direction=0;
-             direction<GeometryInfo<dim>::faces_per_cell; ++direction)
-          if (cell->at_boundary(direction)
-              &&
-              (function_map.find(cell->face(direction)->boundary_id()) != function_map.end()))
-            {
-              const Function<DoFHandlerType::space_dimension,number> &boundary_function
-                = *function_map.find(cell->face(direction)->boundary_id())->second;
-
-              // get the FE corresponding to this
-              // cell
-              const FiniteElement<dim,spacedim> &fe = cell->get_fe();
-              Assert (fe.n_components() == boundary_function.n_components,
-                      ExcDimensionMismatch(fe.n_components(),
-                                           boundary_function.n_components));
-
-              Assert (component_mask.n_selected_components(fe.n_components()) > 0,
-                      ComponentMask::ExcNoComponentSelected());
-
-              // now set the value of
-              // the vertex degree of
-              // freedom. setting
-              // also creates the
-              // entry in the map if
-              // it did not exist
-              // beforehand
-              //
-              // save some time by
-              // requesting values
-              // only once for each
-              // point, irrespective
-              // of the number of
-              // components of the
-              // function
-              Vector<number> function_values (fe.n_components());
-              if (fe.n_components() == 1)
-                function_values(0)
-                  = boundary_function.value (cell->vertex(direction));
-              else
-                boundary_function.vector_value (cell->vertex(direction),
-                                                function_values);
-
-              for (unsigned int i=0; i<fe.dofs_per_vertex; ++i)
-                if (component_mask[fe.face_system_to_component_index(i).first])
-                  boundary_values[cell->
-                                  vertex_dof_index(direction,i,
-                                                   cell->active_fe_index())]
-                    = function_values(fe.face_system_to_component_index(i).first);
-            }
-    }
-
-
-
-    // template for the case dim!=1. Since the function has a template argument
-    // dim_, it is clearly less specialized than the 1d function above and
-    // whenever possible (i.e., if dim==1), the function template above
-    // will be used
-    template <typename number, typename DoFHandlerType, template <int,int> class M_or_MC, int dim_>
     static inline
     void
     do_interpolate_boundary_values
@@ -1775,8 +1692,7 @@ namespace VectorTools
      const DoFHandlerType                                                                        &dof,
      const std::map<types::boundary_id, const Function<DoFHandlerType::space_dimension,number>*> &function_map,
      std::map<types::global_dof_index,number>                                                    &boundary_values,
-     const ComponentMask                                                                         &component_mask,
-     const dealii::internal::int2type<dim_>)
+     const ComponentMask                                                                         &component_mask)
     {
       const unsigned int dim = DoFHandlerType::dimension;
       const unsigned int spacedim=DoFHandlerType::space_dimension;
@@ -1797,214 +1713,267 @@ namespace VectorTools
                          "for interior faces in your function map."));
 
       const unsigned int        n_components = DoFTools::n_components(dof);
-      const bool                fe_is_system = (n_components != 1);
-
       for (typename std::map<types::boundary_id, const Function<spacedim,number>*>::const_iterator i=function_map.begin();
            i!=function_map.end(); ++i)
         Assert (n_components == i->second->n_components,
                 ExcDimensionMismatch(n_components, i->second->n_components));
 
-      // field to store the indices
-      std::vector<types::global_dof_index> face_dofs;
-      face_dofs.reserve (DoFTools::max_dofs_per_face(dof));
 
-      std::vector<Point<spacedim> >  dof_locations;
-      dof_locations.reserve (DoFTools::max_dofs_per_face(dof));
-
-      // array to store the values of the boundary function at the boundary
-      // points. have two arrays for scalar and vector functions to use the
-      // more efficient one respectively
-      std::vector<number>          dof_values_scalar;
-      std::vector<Vector<number> > dof_values_system;
-      dof_values_scalar.reserve (DoFTools::max_dofs_per_face (dof));
-      dof_values_system.reserve (DoFTools::max_dofs_per_face (dof));
-
-      // before we start with the loop over all cells create an hp::FEValues
-      // object that holds the interpolation points of all finite elements
-      // that may ever be in use
-      dealii::hp::FECollection<dim,spacedim> finite_elements (dof.get_fe());
-      dealii::hp::QCollection<dim-1>  q_collection;
-      for (unsigned int f=0; f<finite_elements.size(); ++f)
+      // interpolate boundary values in 1d. in higher dimensions, we
+      // use FEValues to figure out what to do on faces, but in 1d
+      // faces are points and it is far easier to simply work on
+      // individual vertices
+      if (dim == 1)
         {
-          const FiniteElement<dim,spacedim> &fe = finite_elements[f];
-
-          // generate a quadrature rule on the face from the unit support
-          // points. this will be used to obtain the quadrature points on the
-          // real cell's face
-          //
-          // to do this, we check whether the FE has support points on the
-          // face at all:
-          if (fe.has_face_support_points())
-            q_collection.push_back (Quadrature<dim-1>(fe.get_unit_face_support_points()));
-          else
-            {
-              // if not, then we should try a more clever way. the idea is
-              // that a finite element may not offer support points for all
-              // its shape functions, but maybe only some. if it offers
-              // support points for the components we are interested in in
-              // this function, then that's fine. if not, the function we call
-              // in the finite element will raise an exception. the support
-              // points for the other shape functions are left uninitialized
-              // (well, initialized by the default constructor), since we
-              // don't need them anyway.
-              //
-              // As a detour, we must make sure we only query
-              // face_system_to_component_index if the index corresponds to a
-              // primitive shape function. since we know that all the
-              // components we are interested in are primitive (by the above
-              // check), we can safely put such a check in front
-              std::vector<Point<dim-1> > unit_support_points (fe.dofs_per_face);
-
-              for (unsigned int i=0; i<fe.dofs_per_face; ++i)
-                if (fe.is_primitive (fe.face_to_cell_index(i,0)))
-                  if (component_mask[fe.face_system_to_component_index(i).first]
-                      == true)
-                    unit_support_points[i] = fe.unit_face_support_point(i);
-
-              q_collection.push_back (Quadrature<dim-1>(unit_support_points));
-            }
-        }
-      // now that we have a q_collection object with all the right quadrature
-      // points, create an hp::FEFaceValues object that we can use to evaluate
-      // the boundary values at
-      dealii::hp::MappingCollection<dim,spacedim> mapping_collection (mapping);
-      dealii::hp::FEFaceValues<dim,spacedim> x_fe_values (mapping_collection, finite_elements, q_collection,
-                                                          update_quadrature_points);
-
-      typename DoFHandlerType::active_cell_iterator cell = dof.begin_active(),
-                                                    endc = dof.end();
-      for (; cell!=endc; ++cell)
-        if (!cell->is_artificial())
-          for (unsigned int face_no = 0; face_no < GeometryInfo<dim>::faces_per_cell;
-               ++face_no)
-            {
-              const FiniteElement<dim,spacedim> &fe = cell->get_fe();
-
-              // we can presently deal only with primitive elements for
-              // boundary values. this does not preclude us using
-              // non-primitive elements in components that we aren't
-              // interested in, however. make sure that all shape functions
-              // that are non-zero for the components we are interested in,
-              // are in fact primitive
-              for (unsigned int i=0; i<cell->get_fe().dofs_per_cell; ++i)
-                {
-                  const ComponentMask &nonzero_component_array
-                    = cell->get_fe().get_nonzero_components (i);
-                  for (unsigned int c=0; c<n_components; ++c)
-                    if ((nonzero_component_array[c] == true)
-                        &&
-                        (component_mask[c] == true))
-                      Assert (cell->get_fe().is_primitive (i),
-                              ExcMessage ("This function can only deal with requested boundary "
-                                          "values that correspond to primitive (scalar) base "
-                                          "elements"));
-                }
-
-              const typename DoFHandlerType::face_iterator face = cell->face(face_no);
-              const types::boundary_id boundary_component = face->boundary_id();
-
-              // see if this face is part of the boundaries for which we are
-              // supposed to do something, and also see if the finite element
-              // in use here has DoFs on the face at all
-              if ((function_map.find(boundary_component) != function_map.end())
+          for (typename DoFHandlerType::active_cell_iterator cell = dof.begin_active();
+               cell != dof.end(); ++cell)
+            for (unsigned int direction=0;
+                 direction<GeometryInfo<dim>::faces_per_cell; ++direction)
+              if (cell->at_boundary(direction)
                   &&
-                  (cell->get_fe().dofs_per_face > 0))
+                  (function_map.find(cell->face(direction)->boundary_id()) != function_map.end()))
                 {
-                  // face is of the right component
-                  x_fe_values.reinit(cell, face_no);
-                  const dealii::FEFaceValues<dim,spacedim> &fe_values =
-                    x_fe_values.get_present_fe_values();
+                  const Function<DoFHandlerType::space_dimension,number> &boundary_function
+                    = *function_map.find(cell->face(direction)->boundary_id())->second;
 
-                  // get indices, physical location and boundary values of
-                  // dofs on this face
-                  face_dofs.resize (fe.dofs_per_face);
-                  face->get_dof_indices (face_dofs, cell->active_fe_index());
-                  const std::vector<Point<spacedim> > &dof_locations
-                    = fe_values.get_quadrature_points ();
+                  // get the FE corresponding to this cell
+                  const FiniteElement<dim,spacedim> &fe = cell->get_fe();
+                  Assert (fe.n_components() == boundary_function.n_components,
+                          ExcDimensionMismatch(fe.n_components(),
+                                               boundary_function.n_components));
 
-                  if (fe_is_system)
+                  Assert (component_mask.n_selected_components(fe.n_components()) > 0,
+                          ComponentMask::ExcNoComponentSelected());
+
+                  // now set the value of the vertex degree of
+                  // freedom. setting also creates the entry in the
+                  // map if it did not exist beforehand
+                  //
+                  // save some time by requesting values only once for
+                  // each point, irrespective of the number of
+                  // components of the function
+                  Vector<number> function_values (fe.n_components());
+                  if (fe.n_components() == 1)
+                    function_values(0)
+                      = boundary_function.value (cell->vertex(direction));
+                  else
+                    boundary_function.vector_value (cell->vertex(direction),
+                                                    function_values);
+
+                  for (unsigned int i=0; i<fe.dofs_per_vertex; ++i)
+                    if (component_mask[fe.face_system_to_component_index(i).first])
+                      boundary_values[cell->
+                                      vertex_dof_index(direction,i,
+                                                       cell->active_fe_index())]
+                        = function_values(fe.face_system_to_component_index(i).first);
+                }
+        }
+      else  // dim > 1
+        {
+          const bool                fe_is_system = (n_components != 1);
+
+          // field to store the indices
+          std::vector<types::global_dof_index> face_dofs;
+          face_dofs.reserve (DoFTools::max_dofs_per_face(dof));
+
+          std::vector<Point<spacedim> >  dof_locations;
+          dof_locations.reserve (DoFTools::max_dofs_per_face(dof));
+
+          // array to store the values of the boundary function at the boundary
+          // points. have two arrays for scalar and vector functions to use the
+          // more efficient one respectively
+          std::vector<number>          dof_values_scalar;
+          std::vector<Vector<number> > dof_values_system;
+          dof_values_scalar.reserve (DoFTools::max_dofs_per_face (dof));
+          dof_values_system.reserve (DoFTools::max_dofs_per_face (dof));
+
+          // before we start with the loop over all cells create an hp::FEValues
+          // object that holds the interpolation points of all finite elements
+          // that may ever be in use
+          dealii::hp::FECollection<dim,spacedim> finite_elements (dof.get_fe());
+          dealii::hp::QCollection<dim-1>  q_collection;
+          for (unsigned int f=0; f<finite_elements.size(); ++f)
+            {
+              const FiniteElement<dim,spacedim> &fe = finite_elements[f];
+
+              // generate a quadrature rule on the face from the unit support
+              // points. this will be used to obtain the quadrature points on the
+              // real cell's face
+              //
+              // to do this, we check whether the FE has support points on the
+              // face at all:
+              if (fe.has_face_support_points())
+                q_collection.push_back (Quadrature<dim-1>(fe.get_unit_face_support_points()));
+              else
+                {
+                  // if not, then we should try a more clever way. the idea is
+                  // that a finite element may not offer support points for all
+                  // its shape functions, but maybe only some. if it offers
+                  // support points for the components we are interested in in
+                  // this function, then that's fine. if not, the function we call
+                  // in the finite element will raise an exception. the support
+                  // points for the other shape functions are left uninitialized
+                  // (well, initialized by the default constructor), since we
+                  // don't need them anyway.
+                  //
+                  // As a detour, we must make sure we only query
+                  // face_system_to_component_index if the index corresponds to a
+                  // primitive shape function. since we know that all the
+                  // components we are interested in are primitive (by the above
+                  // check), we can safely put such a check in front
+                  std::vector<Point<dim-1> > unit_support_points (fe.dofs_per_face);
+
+                  for (unsigned int i=0; i<fe.dofs_per_face; ++i)
+                    if (fe.is_primitive (fe.face_to_cell_index(i,0)))
+                      if (component_mask[fe.face_system_to_component_index(i).first]
+                          == true)
+                        unit_support_points[i] = fe.unit_face_support_point(i);
+
+                  q_collection.push_back (Quadrature<dim-1>(unit_support_points));
+                }
+            }
+          // now that we have a q_collection object with all the right quadrature
+          // points, create an hp::FEFaceValues object that we can use to evaluate
+          // the boundary values at
+          dealii::hp::MappingCollection<dim,spacedim> mapping_collection (mapping);
+          dealii::hp::FEFaceValues<dim,spacedim> x_fe_values (mapping_collection, finite_elements, q_collection,
+                                                              update_quadrature_points);
+
+          typename DoFHandlerType::active_cell_iterator cell = dof.begin_active(),
+                                                        endc = dof.end();
+          for (; cell!=endc; ++cell)
+            if (!cell->is_artificial())
+              for (unsigned int face_no = 0; face_no < GeometryInfo<dim>::faces_per_cell;
+                   ++face_no)
+                {
+                  const FiniteElement<dim,spacedim> &fe = cell->get_fe();
+
+                  // we can presently deal only with primitive elements for
+                  // boundary values. this does not preclude us using
+                  // non-primitive elements in components that we aren't
+                  // interested in, however. make sure that all shape functions
+                  // that are non-zero for the components we are interested in,
+                  // are in fact primitive
+                  for (unsigned int i=0; i<cell->get_fe().dofs_per_cell; ++i)
                     {
-                      // resize array. avoid construction of a memory
-                      // allocating temporary if possible
-                      if (dof_values_system.size() < fe.dofs_per_face)
-                        dof_values_system.resize (fe.dofs_per_face,
-                                                  Vector<number>(fe.n_components()));
-                      else
-                        dof_values_system.resize (fe.dofs_per_face);
+                      const ComponentMask &nonzero_component_array
+                        = cell->get_fe().get_nonzero_components (i);
+                      for (unsigned int c=0; c<n_components; ++c)
+                        if ((nonzero_component_array[c] == true)
+                            &&
+                            (component_mask[c] == true))
+                          Assert (cell->get_fe().is_primitive (i),
+                                  ExcMessage ("This function can only deal with requested boundary "
+                                              "values that correspond to primitive (scalar) base "
+                                              "elements"));
+                    }
 
-                      function_map.find(boundary_component)->second
-                      ->vector_value_list (dof_locations, dof_values_system);
+                  const typename DoFHandlerType::face_iterator face = cell->face(face_no);
+                  const types::boundary_id boundary_component = face->boundary_id();
 
-                      // enter those dofs into the list that match the
-                      // component signature. avoid the usual complication
-                      // that we can't just use *_system_to_component_index
-                      // for non-primitive FEs
-                      for (unsigned int i=0; i<face_dofs.size(); ++i)
+                  // see if this face is part of the boundaries for which we are
+                  // supposed to do something, and also see if the finite element
+                  // in use here has DoFs on the face at all
+                  if ((function_map.find(boundary_component) != function_map.end())
+                      &&
+                      (cell->get_fe().dofs_per_face > 0))
+                    {
+                      // face is of the right component
+                      x_fe_values.reinit(cell, face_no);
+                      const dealii::FEFaceValues<dim,spacedim> &fe_values =
+                        x_fe_values.get_present_fe_values();
+
+                      // get indices, physical location and boundary values of
+                      // dofs on this face
+                      face_dofs.resize (fe.dofs_per_face);
+                      face->get_dof_indices (face_dofs, cell->active_fe_index());
+                      const std::vector<Point<spacedim> > &dof_locations
+                        = fe_values.get_quadrature_points ();
+
+                      if (fe_is_system)
                         {
-                          unsigned int component;
-                          if (fe.is_primitive())
-                            component = fe.face_system_to_component_index(i).first;
+                          // resize array. avoid construction of a memory
+                          // allocating temporary if possible
+                          if (dof_values_system.size() < fe.dofs_per_face)
+                            dof_values_system.resize (fe.dofs_per_face,
+                                                      Vector<number>(fe.n_components()));
                           else
+                            dof_values_system.resize (fe.dofs_per_face);
+
+                          function_map.find(boundary_component)->second
+                          ->vector_value_list (dof_locations, dof_values_system);
+
+                          // enter those dofs into the list that match the
+                          // component signature. avoid the usual complication
+                          // that we can't just use *_system_to_component_index
+                          // for non-primitive FEs
+                          for (unsigned int i=0; i<face_dofs.size(); ++i)
                             {
-                              // non-primitive case. make sure that this
-                              // particular shape function _is_ primitive, and
-                              // get at it's component. use usual trick to
-                              // transfer face dof index to cell dof index
-                              const unsigned int cell_i
-                                = (dim == 1 ?
-                                   i
-                                   :
-                                   (dim == 2 ?
-                                    (i<2*fe.dofs_per_vertex ? i : i+2*fe.dofs_per_vertex)
-                                    :
-                                    (dim == 3 ?
-                                     (i<4*fe.dofs_per_vertex ?
-                                      i
-                                      :
-                                      (i<4*fe.dofs_per_vertex+4*fe.dofs_per_line ?
-                                       i+4*fe.dofs_per_vertex
+                              unsigned int component;
+                              if (fe.is_primitive())
+                                component = fe.face_system_to_component_index(i).first;
+                              else
+                                {
+                                  // non-primitive case. make sure that this
+                                  // particular shape function _is_ primitive, and
+                                  // get at it's component. use usual trick to
+                                  // transfer face dof index to cell dof index
+                                  const unsigned int cell_i
+                                    = (dim == 1 ?
+                                       i
                                        :
-                                       i+4*fe.dofs_per_vertex+8*fe.dofs_per_line))
-                                     :
-                                     numbers::invalid_unsigned_int)));
-                              Assert (cell_i < fe.dofs_per_cell, ExcInternalError());
+                                       (dim == 2 ?
+                                        (i<2*fe.dofs_per_vertex ? i : i+2*fe.dofs_per_vertex)
+                                        :
+                                        (dim == 3 ?
+                                         (i<4*fe.dofs_per_vertex ?
+                                          i
+                                          :
+                                          (i<4*fe.dofs_per_vertex+4*fe.dofs_per_line ?
+                                           i+4*fe.dofs_per_vertex
+                                           :
+                                           i+4*fe.dofs_per_vertex+8*fe.dofs_per_line))
+                                         :
+                                         numbers::invalid_unsigned_int)));
+                                  Assert (cell_i < fe.dofs_per_cell, ExcInternalError());
 
-                              // make sure that if this is not a primitive
-                              // shape function, then all the corresponding
-                              // components in the mask are not set
-                              if (!fe.is_primitive(cell_i))
-                                for (unsigned int c=0; c<n_components; ++c)
-                                  if (fe.get_nonzero_components(cell_i)[c])
-                                    Assert (component_mask[c] == false,
-                                            FETools::ExcFENotPrimitive());
+                                  // make sure that if this is not a primitive
+                                  // shape function, then all the corresponding
+                                  // components in the mask are not set
+                                  if (!fe.is_primitive(cell_i))
+                                    for (unsigned int c=0; c<n_components; ++c)
+                                      if (fe.get_nonzero_components(cell_i)[c])
+                                        Assert (component_mask[c] == false,
+                                                FETools::ExcFENotPrimitive());
 
-                              // let's pick the first of possibly more than
-                              // one non-zero components. if shape function is
-                              // non-primitive, then we will ignore the result
-                              // in the following anyway, otherwise there's
-                              // only one non-zero component which we will use
-                              component = fe.get_nonzero_components(cell_i).first_selected_component();
+                                  // let's pick the first of possibly more than
+                                  // one non-zero components. if shape function is
+                                  // non-primitive, then we will ignore the result
+                                  // in the following anyway, otherwise there's
+                                  // only one non-zero component which we will use
+                                  component = fe.get_nonzero_components(cell_i).first_selected_component();
+                                }
+
+                              if (component_mask[component] == true)
+                                boundary_values[face_dofs[i]] = dof_values_system[i](component);
                             }
+                        }
+                      else
+                        // fe has only one component, so save some computations
+                        {
+                          // get only the one component that this function has
+                          dof_values_scalar.resize (fe.dofs_per_face);
+                          function_map.find(boundary_component)->second
+                          ->value_list (dof_locations, dof_values_scalar, 0);
 
-                          if (component_mask[component] == true)
-                            boundary_values[face_dofs[i]] = dof_values_system[i](component);
+                          // enter into list
+
+                          for (unsigned int i=0; i<face_dofs.size(); ++i)
+                            boundary_values[face_dofs[i]] = dof_values_scalar[i];
                         }
                     }
-                  else
-                    // fe has only one component, so save some computations
-                    {
-                      // get only the one component that this function has
-                      dof_values_scalar.resize (fe.dofs_per_face);
-                      function_map.find(boundary_component)->second
-                      ->value_list (dof_locations, dof_values_scalar, 0);
-
-                      // enter into list
-
-                      for (unsigned int i=0; i<face_dofs.size(); ++i)
-                        boundary_values[face_dofs[i]] = dof_values_scalar[i];
-                    }
                 }
-            }
+        }
     } // end of interpolate_boundary_values
   } // end of namespace internal
 
@@ -2020,8 +1989,7 @@ namespace VectorTools
    const ComponentMask                                                                         &component_mask_)
   {
     do_interpolate_boundary_values (mapping, dof, function_map, boundary_values,
-                                    component_mask_,
-                                    dealii::internal::int2type<DoFHandlerType::dimension>());
+                                    component_mask_);
   }
 
 
@@ -2053,8 +2021,7 @@ namespace VectorTools
    const ComponentMask                                                  &component_mask_)
   {
     do_interpolate_boundary_values (mapping, dof, function_map, boundary_values,
-                                    component_mask_,
-                                    dealii::internal::int2type<dim>());
+                                    component_mask_);
   }
 
 
@@ -2343,7 +2310,12 @@ namespace VectorTools
                       level = cell->level();
                     else
                       {
-                        Assert (level == cell->level(), ExcNotImplemented());
+                        Assert (level == cell->level(),
+                                ExcMessage("The mesh you use in projecting boundary values "
+                                           "has hanging nodes at the boundary. This would require "
+                                           "dealing with hanging node constraints when solving "
+                                           "the linear system on the boundary, but this is not "
+                                           "currently implemented."));
                       }
                   }
               }
@@ -6657,7 +6629,97 @@ namespace VectorTools
                               norm, weight, exponent);
   }
 
+  template <int dim, int spacedim, class InVector>
+  double compute_global_error(const Triangulation<dim,spacedim> &tria,
+                              const InVector &cellwise_error,
+                              const NormType &norm,
+                              const double exponent)
+  {
+    Assert( cellwise_error.size() == tria.n_active_cells(),
+            ExcMessage("input vector cell_error has invalid size!"));
+#ifdef DEBUG
+    {
+      // check that off-processor entries are zero. Otherwise we will compute
+      // wrong results below!
+      typename InVector::size_type i = 0;
+      typename Triangulation<dim,spacedim>::active_cell_iterator it = tria.begin_active();
+      for (; i<cellwise_error.size(); ++i, ++it)
+        if (!it->is_locally_owned())
+          Assert(std::fabs(cellwise_error[i]) <  1e-20,
+                 ExcMessage("cellwise_error of cells that are not locally owned need to be zero!"));
+    }
+#endif
 
+    MPI_Comm comm = MPI_COMM_SELF;
+#ifdef DEAL_II_WITH_MPI
+    if (const parallel::Triangulation<dim,spacedim> *ptria =
+          dynamic_cast<const parallel::Triangulation<dim,spacedim>*>(&tria))
+      comm = ptria->get_communicator();
+#endif
+
+    switch (norm)
+      {
+      case L2_norm:
+      case H1_seminorm:
+      case H1_norm:
+      case Hdiv_seminorm:
+      {
+        const double local = cellwise_error.l2_norm();
+        return std::sqrt (Utilities::MPI::sum (local * local, comm));
+      }
+
+      case L1_norm:
+      {
+        const double local = cellwise_error.l1_norm();
+        return Utilities::MPI::sum (local, comm);
+      }
+
+      case Linfty_norm:
+      case W1infty_seminorm:
+      {
+        const double local = cellwise_error.linfty_norm();
+        return Utilities::MPI::max (local, comm);
+      }
+
+      case W1infty_norm:
+      {
+        AssertThrow(false, ExcMessage(
+                      "compute_global_error() is impossible for "
+                      "the W1infty_norm. See the documentation for "
+                      "NormType::W1infty_norm for more information."));
+        return std::numeric_limits<double>::infinity();
+      }
+
+      case mean:
+      {
+        // Note: mean is defined as int_\Omega f = sum_K \int_K f, so we need
+        // the sum of the cellwise errors not the Euclidean mean value that
+        // is returned by Vector<>::mean_value().
+        const double local = cellwise_error.mean_value()
+                             * cellwise_error.size();
+        return Utilities::MPI::sum (local, comm);
+      }
+
+      case Lp_norm:
+      case W1p_norm:
+      case W1p_seminorm:
+      {
+        double local = 0;
+        typename InVector::size_type i;
+        typename Triangulation<dim,spacedim>::active_cell_iterator it = tria.begin_active();
+        for (i = 0; i<cellwise_error.size(); ++i, ++it)
+          if (it->is_locally_owned())
+            local += std::pow(cellwise_error[i], exponent);
+
+        return std::pow (Utilities::MPI::sum (local, comm), 1./exponent);
+      }
+
+      default:
+        AssertThrow(false, ExcNotImplemented());
+        break;
+      }
+    return 0.0;
+  }
 
   template <int dim, typename VectorType, int spacedim>
   void
@@ -7081,15 +7143,8 @@ namespace VectorTools
       }
     else
       {
-        // This function is not implemented for distributed vectors, so
-        // if v is not a boring Vector or BlockVector:
-        Assert(   dynamic_cast<Vector<double> *>(& v)
-                  || dynamic_cast<Vector<float> *>(& v)
-                  || dynamic_cast<Vector<long double> *>(& v)
-                  || dynamic_cast<BlockVector<double> *>(& v)
-                  || dynamic_cast<BlockVector<float> *>(& v)
-                  || dynamic_cast<BlockVector<long double> *>(& v),
-                  ExcNotImplemented());
+        // This function is not implemented for distributed vectors.
+        Assert(!v.supports_distributed_data, ExcNotImplemented());
 
         const unsigned int n = v.size();
 

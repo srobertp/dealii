@@ -32,8 +32,6 @@ template <int dim, int spacedim>
 Manifold<dim, spacedim>::~Manifold ()
 {}
 
-
-
 template <int dim, int spacedim>
 Point<spacedim>
 Manifold<dim, spacedim>::
@@ -44,22 +42,231 @@ project_to_manifold (const std::vector<Point<spacedim> > &,
   return Point<spacedim>();
 }
 
-
+template <int dim, int spacedim>
+Point<spacedim>
+Manifold<dim, spacedim>::
+get_intermediate_point (const Point<spacedim> &p1,
+                        const Point<spacedim> &p2,
+                        const double w) const
+{
+  std::vector<Point<spacedim> > vertices;
+  vertices.push_back(p1);
+  vertices.push_back(p2);
+  return project_to_manifold(vertices, w * p1 + (1-w)*p2 );
+}
 
 template <int dim, int spacedim>
 Point<spacedim>
 Manifold<dim, spacedim>::
 get_new_point (const Quadrature<spacedim> &quad) const
 {
-  Assert(std::abs(std::accumulate(quad.get_weights().begin(), quad.get_weights().end(), 0.0)-1.0) < 1e-10,
+  const double tol = 1e-10;
+
+  Assert(quad.size() > 0,
+         ExcMessage("Quadrature should have at least one point."));
+
+  Assert(std::abs(std::accumulate(quad.get_weights().begin(), quad.get_weights().end(), 0.0)-1.0) < tol,
          ExcMessage("The weights for the individual points should sum to 1!"));
 
-  Point<spacedim> p;
-  for (unsigned int i=0; i<quad.size(); ++i)
-    p += quad.weight(i) * quad.point(i);
+  QSorted<spacedim> sorted_quad(quad);
+  Point<spacedim> p = sorted_quad.point(0);
+  double w = sorted_quad.weight(0);
 
-  return project_to_manifold(quad.get_points(), p);
+  for (unsigned int i=1; i<sorted_quad.size(); ++i)
+    {
+      double weight = 0.0;
+      if ( (sorted_quad.weight(i) + w) < tol )
+        weight = 0.0;
+      else
+        weight =  w/(sorted_quad.weight(i) + w);
+
+      p = get_intermediate_point(p, sorted_quad.point(i),1.0 - weight );
+      w += sorted_quad.weight(i);
+    }
+
+  return p;
 }
+
+
+
+template <>
+Tensor<1,2>
+Manifold<2, 2>::
+normal_vector (const Triangulation<2, 2>::face_iterator &face,
+               const Point<2> &p) const
+{
+  const int spacedim=2;
+
+  Tensor<1,spacedim> tangent = ((p-face->vertex(0)).norm_square() > (p-face->vertex(1)).norm_square() ?
+                                -get_tangent_vector(p, face->vertex(0)) :
+                                get_tangent_vector(p, face->vertex(1)));
+  Tensor<1,spacedim> normal = cross_product_2d(tangent);
+  return normal/normal.norm();
+}
+
+template<>
+Tensor<1,3>
+Manifold<3, 3>::
+normal_vector (const Triangulation<3, 3>::face_iterator &face,
+               const Point<3> &p) const
+{
+  const int spacedim=3;
+  Tensor<1,spacedim> t1,t2;
+
+  // Take the difference between p and all four vertices
+  int min_index=0;
+  Tensor<1,spacedim> dp = p-face->vertex(0);
+  double min_distance = dp.norm_square();
+
+  for (unsigned int i=1; i<4; ++i)
+    {
+      dp = p-face->vertex(i);
+      double distance = dp.norm_square();
+      if (distance < min_distance)
+        {
+          min_index = i;
+          min_distance = distance;
+        }
+    }
+  // Verify we have a valid vertex index
+  AssertIndexRange(min_index, 4);
+
+  // Now figure out which vertices are better to compute tangent vectors
+  // we split the cell in 4 quadrants, and use the most orthogonal vertices
+  // to the closest vertex if we ar far from the center, othewise we use
+  // the two consecutive vertices, on the opposite side with respect to
+  // the face center.
+  if ((p-face->center()).norm_square() < min_distance)
+    {
+      // we are close to the face center: pick two consecutive vertices,
+      // but not the closest one. We make sure the direction is always
+      // the same.
+      if (min_index < 2)
+        {
+          t1 = get_tangent_vector(p, face->vertex(3));
+          t2 = get_tangent_vector(p, face->vertex(2));
+        }
+      else
+        {
+          t1 = get_tangent_vector(p, face->vertex(0));
+          t2 = get_tangent_vector(p, face->vertex(1));
+        }
+    }
+  else
+    {
+      switch (min_index)
+        {
+        case 0:
+        {
+          t1 = get_tangent_vector(p, face->vertex(1));
+          t2 = get_tangent_vector(p, face->vertex(2));
+          break;
+        }
+        case 1:
+        {
+          t1 = get_tangent_vector(p, face->vertex(3));
+          t2 = get_tangent_vector(p, face->vertex(0));
+          break;
+        }
+        case 2:
+        {
+          t1 = get_tangent_vector(p, face->vertex(0));
+          t2 = get_tangent_vector(p, face->vertex(3));
+          break;
+        }
+        case 3:
+        {
+          t1 = get_tangent_vector(p, face->vertex(2));
+          t2 = get_tangent_vector(p, face->vertex(1));
+          break;
+        }
+        default:
+          Assert(false, ExcInternalError());
+          break;
+        }
+    }
+  Tensor<1,spacedim> normal = cross_product_3d(t1,t2);
+  return normal/normal.norm();
+}
+
+
+template <int dim, int spacedim>
+Tensor<1,spacedim>
+Manifold<dim, spacedim>::
+normal_vector (const typename Triangulation<dim, spacedim>::face_iterator &/*face*/,
+               const Point<spacedim> &/*p*/) const
+{
+  Assert(false, ExcPureFunctionCalled());
+  return Tensor<1,spacedim>();
+}
+
+
+
+template <>
+void
+Manifold<2, 2>::
+get_normals_at_vertices (const Triangulation<2, 2>::face_iterator &face,
+                         FaceVertexNormals &n) const
+{
+  n[0] = cross_product_2d(get_tangent_vector(face->vertex(0), face->vertex(1)));
+  n[1] = -cross_product_2d(get_tangent_vector(face->vertex(1), face->vertex(0)));
+
+  for (unsigned int i=0; i<2; ++i)
+    {
+      Assert(n[i].norm() != 0, ExcInternalError("Something went wrong. The "
+                                                "computed normals have "
+                                                "zero length."));
+      n[i] /= n[i].norm();
+    }
+}
+
+
+template <>
+void
+Manifold<3, 3>::
+get_normals_at_vertices (const Triangulation<3, 3>::face_iterator &face,
+                         FaceVertexNormals &n) const
+{
+  n[0] = cross_product_3d
+         (get_tangent_vector(face->vertex(0), face->vertex(1)),
+          get_tangent_vector(face->vertex(0), face->vertex(2)));
+
+  n[1] = cross_product_3d
+         (get_tangent_vector(face->vertex(1), face->vertex(3)),
+          get_tangent_vector(face->vertex(1), face->vertex(0)));
+
+  n[2] = cross_product_3d
+         (get_tangent_vector(face->vertex(2), face->vertex(0)),
+          get_tangent_vector(face->vertex(2), face->vertex(3)));
+
+  n[3] = cross_product_3d
+         (get_tangent_vector(face->vertex(3), face->vertex(2)),
+          get_tangent_vector(face->vertex(3), face->vertex(1)));
+
+  for (unsigned int i=0; i<4; ++i)
+    {
+      Assert(n[i].norm() != 0, ExcInternalError("Something went wrong. The "
+                                                "computed normals have "
+                                                "zero length."));
+      n[i] /=n[i].norm();
+    }
+}
+
+
+template <int dim, int spacedim>
+void
+Manifold<dim, spacedim>::
+get_normals_at_vertices (const typename Triangulation<dim, spacedim>::face_iterator &face,
+                         FaceVertexNormals &n) const
+{
+  for (unsigned int v=0; v<GeometryInfo<dim>::vertices_per_face; ++v)
+    {
+      n[v] = normal_vector(face, face->vertex(v));
+      n[v] /= n[v].norm();
+    }
+}
+
+
 
 
 template <int dim, int spacedim>
@@ -228,7 +435,7 @@ Manifold<dim,spacedim>::get_tangent_vector(const Point<spacedim> &x1,
 
 
 template <int dim, int spacedim>
-FlatManifold<dim,spacedim>::FlatManifold (const Point<spacedim> &periodicity,
+FlatManifold<dim,spacedim>::FlatManifold (const Tensor<1,spacedim> &periodicity,
                                           const double tolerance)
   :
   periodicity(periodicity),
@@ -246,37 +453,36 @@ get_new_point (const Quadrature<spacedim> &quad) const
   const std::vector<Point<spacedim> > &surrounding_points = quad.get_points();
   const std::vector<double> &weights = quad.get_weights();
 
-  Point<spacedim> p;
-  Point<spacedim> dp;
-  Point<spacedim> minP = periodicity;
-  const bool check_period = (periodicity.norm() > tolerance);
-  if (check_period)
-    for (unsigned int i=0; i<surrounding_points.size(); ++i)
-      for (unsigned int d=0; d<spacedim; ++d)
+  Tensor<1,spacedim> minP = periodicity;
+
+  for (unsigned int d=0; d<spacedim; ++d)
+    if (periodicity[d] > 0)
+      for (unsigned int i=0; i<surrounding_points.size(); ++i)
         {
           minP[d] = std::min(minP[d], surrounding_points[i][d]);
-          if (periodicity[d] > 0)
-            Assert( (surrounding_points[i][d] < periodicity[d]+tolerance*periodicity.norm()) ||
-                    (surrounding_points[i][d] >= -tolerance*periodicity.norm()),
-                    ExcPeriodicBox(d, surrounding_points[i], periodicity, tolerance*periodicity.norm()));
+          Assert( (surrounding_points[i][d] < periodicity[d]+tolerance*periodicity[d]) ||
+                  (surrounding_points[i][d] >= -tolerance*periodicity[d]),
+                  ExcPeriodicBox(d, surrounding_points[i], periodicity[i]));
         }
 
+  // compute the weighted average point, possibly taking into account periodicity
+  Point<spacedim> p;
   for (unsigned int i=0; i<surrounding_points.size(); ++i)
     {
-      dp = Point<spacedim>();
-      if (check_period)
-        {
-          for (unsigned int d=0; d<spacedim; ++d)
-            if (periodicity[d] > 0)
-              dp[d] = ( (surrounding_points[i][d]-minP[d]) > periodicity[d]/2.0 ?
-                        -periodicity[d] : 0.0 );
-        }
+      Point<spacedim> dp;
+      for (unsigned int d=0; d<spacedim; ++d)
+        if (periodicity[d] > 0)
+          dp[d] = ( (surrounding_points[i][d]-minP[d]) > periodicity[d]/2.0 ?
+                    -periodicity[d] : 0.0 );
+
       p += (surrounding_points[i]+dp)*weights[i];
     }
-  if (check_period)
-    for (unsigned int d=0; d<spacedim; ++d)
-      if (periodicity[d] > 0)
-        p[d] = (p[d] < 0 ? p[d] + periodicity[d] : p[d]);
+
+  // if necessary, also adjust the weighted point by the periodicity
+  for (unsigned int d=0; d<spacedim; ++d)
+    if (periodicity[d] > 0)
+      if (p[d] < 0)
+        p[d] += periodicity[d];
 
   return project_to_manifold(surrounding_points, p);
 }
@@ -289,6 +495,15 @@ FlatManifold<dim, spacedim>::project_to_manifold (const std::vector<Point<spaced
                                                   const Point<spacedim> &candidate) const
 {
   return candidate;
+}
+
+
+
+template <int dim, int spacedim>
+const Tensor<1,spacedim> &
+FlatManifold<dim, spacedim>::get_periodicity() const
+{
+  return periodicity;
 }
 
 
@@ -327,10 +542,11 @@ ChartManifold<dim,spacedim,chartdim>::~ChartManifold ()
 
 
 template <int dim, int spacedim, int chartdim>
-ChartManifold<dim,spacedim,chartdim>::ChartManifold (const Point<chartdim> &periodicity)
+ChartManifold<dim,spacedim,chartdim>::ChartManifold (const Tensor<1,chartdim> &periodicity)
   :
   sub_manifold(periodicity)
 {}
+
 
 
 template <int dim, int spacedim, int chartdim>
@@ -365,6 +581,7 @@ push_forward_gradient(const Point<chartdim> &) const
 }
 
 
+
 template <int dim, int spacedim, int chartdim>
 Tensor<1,spacedim>
 ChartManifold<dim,spacedim,chartdim>::
@@ -372,6 +589,16 @@ get_tangent_vector (const Point<spacedim> &x1,
                     const Point<spacedim> &x2) const
 {
   const DerivativeForm<1,chartdim,spacedim> F_prime = push_forward_gradient(pull_back(x1));
+
+  // ensure that the chart is not singular by asserting that its
+  // derivative has a positive determinant. we need to make this
+  // comparison relative to the size of the derivative. since the
+  // determinant is the product of chartdim factors, take the
+  // chartdim-th root of it in comparing against the size of the
+  // derivative
+  Assert (std::pow(std::abs(F_prime.determinant()), 1./chartdim) >= 1e-12 * F_prime.norm(),
+          ExcMessage("The derivative of a chart function must not be singular."));
+
   const Tensor<1,chartdim>                  delta   = sub_manifold.get_tangent_vector(pull_back(x1),
                                                       pull_back(x2));
 
@@ -382,6 +609,14 @@ get_tangent_vector (const Point<spacedim> &x1,
   return result;
 }
 
+
+
+template <int dim, int spacedim, int chartdim>
+const Tensor<1, chartdim> &
+ChartManifold<dim, spacedim, chartdim>::get_periodicity() const
+{
+  return sub_manifold.get_periodicity();
+}
 
 // explicit instantiations
 #include "manifold.inst"

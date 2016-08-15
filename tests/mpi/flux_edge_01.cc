@@ -18,7 +18,7 @@
 
 #include "../tests.h"
 #include <deal.II/lac/sparse_matrix.h>
-#include <deal.II/lac/compressed_sparsity_pattern.h>
+#include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/precondition.h>
 #include <deal.II/lac/precondition_block.h>
@@ -113,22 +113,22 @@ namespace Step39
 
     DoFTools::extract_locally_relevant_dofs (dof_handler, locally_relevant_set);
 
-    CompressedSimpleSparsityPattern c_sparsity(dof_handler.n_dofs(), dof_handler.n_dofs());
+    DynamicSparsityPattern c_sparsity(dof_handler.n_dofs(), dof_handler.n_dofs());
     DoFTools::make_flux_sparsity_pattern(dof_handler, c_sparsity);
     matrix.reinit(dof_handler.locally_owned_dofs(), c_sparsity, MPI_COMM_WORLD, true);
 
     const unsigned int n_levels = triangulation.n_global_levels();
     mg_matrix.resize(0, n_levels-1);
-    mg_matrix.clear();
+    mg_matrix.clear_elements();
     mg_matrix_dg_up.resize(0, n_levels-1);
-    mg_matrix_dg_up.clear();
+    mg_matrix_dg_up.clear_elements();
     mg_matrix_dg_down.resize(0, n_levels-1);
-    mg_matrix_dg_down.clear();
+    mg_matrix_dg_down.clear_elements();
 
     for (unsigned int level=mg_matrix.min_level();
          level<=mg_matrix.max_level(); ++level)
       {
-        CompressedSimpleSparsityPattern c_sparsity(dof_handler.n_dofs(level));
+        DynamicSparsityPattern c_sparsity(dof_handler.n_dofs(level));
         MGTools::make_flux_sparsity_pattern(dof_handler, c_sparsity, level);
         mg_matrix[level].reinit(dof_handler.locally_owned_mg_dofs(level),
                                 dof_handler.locally_owned_mg_dofs(level),
@@ -137,7 +137,7 @@ namespace Step39
 
         if (level>0)
           {
-            CompressedSimpleSparsityPattern ci_sparsity;
+            DynamicSparsityPattern ci_sparsity;
             ci_sparsity.reinit(dof_handler.n_dofs(level-1), dof_handler.n_dofs(level));
             MGTools::make_flux_sparsity_pattern_edge(dof_handler, ci_sparsity, level);
 

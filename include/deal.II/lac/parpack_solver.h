@@ -110,7 +110,21 @@ extern "C" {
  * of objects of type <code>V</code> that will contain the eigenvectors
  * computed. <code>OP</code> is an inverse operation for the matrix <code>A -
  * sigma * B</code>, where <code> sigma </code> is a shift value, set to zero
- * by default.
+ * by default. Note that (P)Arpack supports other transformations, but currently
+ * this class implements only shift-and-invert mode.
+ *
+ * The <code>OP</code> can be specified either using auxiliary Shift class together
+ * with IterativeInverse or by using LinearOperator
+ * @code
+ *   const double shift = 5.0;
+ *   const auto op_A = linear_operator<vector_t>(A);
+ *   const auto op_B = linear_operator<vector_t>(B);
+ *   const auto op_shift = op_A - shift * op_B;
+ *   SolverControl solver_control_lin (1000, 1e-10,false,false);
+ *
+ *   SolverCG<vector_t> cg(solver_control_lin);
+ *   const auto op_shift_invert = inverse_operator(op_shift, cg, PreconditionIdentity ());
+ * @endcode
  *
  * Through the AdditionalData the user can specify some of the parameters to
  * be set.
@@ -137,7 +151,9 @@ public:
 
   /**
    * An enum that lists the possible choices for which eigenvalues to compute
-   * in the solve() function.
+   * in the solve() function. Note, that this corresponds to the problem after
+   * shift-and-invert (the only currently supported spectral transformation)
+   * is applied.
    *
    * A particular choice is limited based on symmetric or non-symmetric matrix
    * <code>A</code> considered.
@@ -231,10 +247,25 @@ public:
   /**
    * Initialise internal variables.
    */
-  void reinit(const dealii::IndexSet &locally_owned_dofs );
+  void reinit(const IndexSet &locally_owned_dofs );
 
   /**
-   * Set desired shift value.
+   * Initialize internal variables when working with BlockVectors.
+   * @p locally_owned_dofs is used to set the dimension of the problem,
+   * whereas @p partitioning is used for calling the reinit of the deal.II
+   * blockvectors used.
+   */
+  void reinit(const IndexSet &locally_owned_dofs,
+              const std::vector<IndexSet> &partitioning);
+
+  /**
+   * Set initial vector for building Krylov space.
+   */
+  void set_initial_vector(const VectorType &vec);
+
+  /**
+   * Set desired shift value. If this function is not called, the
+   * shift is assumed to be zero.
    */
   void set_shift(const double s );
 
@@ -320,6 +351,11 @@ protected:
   std::vector<double> v;
 
   /**
+   * An auxiliary flag which is set to true when initial vector is provided.
+   */
+  bool initial_vector_provided;
+
+  /**
    * The initial residual vector, possibly from a previous run.  On output, it
    * contains the final residual vector.
    */
@@ -370,10 +406,18 @@ protected:
 private:
 
   /**
+   * Initialize internal variables which depend on
+   * @p locally_owned_dofs.
+   *
+   * This function is called inside the reinit() functions
+   */
+  void internal_reinit(const IndexSet &locally_owned_dofs);
+
+  /**
    * PArpackExcInfoPdnaupds.
    */
   DeclException2 (PArpackExcConvergedEigenvectors, int, int,
-                  << arg1 << "eigenpairs were requested, but only"
+                  << arg1 << " eigenpairs were requested, but only "
                   << arg2 << " converged");
 
   DeclException2 (PArpackExcInvalidNumberofEigenvalues, int, int,
@@ -383,6 +427,11 @@ private:
   DeclException2 (PArpackExcInvalidEigenvectorSize, int, int,
                   << "Number of wanted eigenvalues " << arg1
                   << " is larger that the size of eigenvectors " << arg2);
+
+  DeclException2 (PArpackExcInvalidEigenvectorSizeNonsymmetric, int, int,
+                  << "To store the real and complex parts of " << arg1
+                  << " eigenvectors in real-valued vectors, their size (currently set to " << arg2
+                  << ") should be greater than or equal to " << arg1+1);
 
   DeclException2 (PArpackExcInvalidEigenvalueSize, int, int,
                   << "Number of wanted eigenvalues " << arg1
@@ -458,6 +507,7 @@ PArpackSolver<VectorType>::PArpackSolver (SolverControl        &control,
   additional_data (data),
   mpi_communicator( mpi_communicator ),
   mpi_communicator_fortran ( MPI_Comm_c2f( mpi_communicator ) ),
+  initial_vector_provided(false),
   shift_value(0.0)
 
 {}
@@ -469,7 +519,21 @@ void PArpackSolver<VectorType>::set_shift(const double s )
 }
 
 template <typename VectorType>
-void PArpackSolver<VectorType>::reinit(const dealii::IndexSet &locally_owned_dofs)
+void PArpackSolver<VectorType>::
+set_initial_vector(const VectorType &vec)
+{
+  initial_vector_provided = true;
+  Assert (resid.size() == local_indices.size(),
+          ExcDimensionMismatch(resid.size(),local_indices.size()));
+  vec.extract_subvector_to (local_indices.begin(),
+                            local_indices.end(),
+                            &resid[0]);
+}
+
+
+template <typename VectorType>
+void PArpackSolver<VectorType>::
+internal_reinit(const IndexSet &locally_owned_dofs)
 {
   // store local indices to write to vectors
   locally_owned_dofs.fill_index_vector(local_indices);
@@ -478,13 +542,12 @@ void PArpackSolver<VectorType>::reinit(const dealii::IndexSet &locally_owned_dof
   nloc = locally_owned_dofs.n_elements ();
   ncv  = additional_data.number_of_arnoldi_vectors;
 
-  Assert (local_indices.size() == nloc, ExcInternalError() );
+  Assert ((int)local_indices.size() == nloc, ExcInternalError() );
 
   // vectors
   ldv = nloc;
   v.resize (ldv*ncv, 0.0);
 
-  // TODO: add optional input for resid
   resid.resize(nloc, 1.0);
 
   // work arrays for ARPACK
@@ -507,11 +570,30 @@ void PArpackSolver<VectorType>::reinit(const dealii::IndexSet &locally_owned_dof
   workev.resize (lworkev, 0.);
 
   select.resize (ncv, 0);
+}
+
+template <typename VectorType>
+void PArpackSolver<VectorType>::reinit(const IndexSet &locally_owned_dofs)
+{
+  internal_reinit(locally_owned_dofs);
 
   // deal.II vectors:
   src.reinit (locally_owned_dofs,mpi_communicator);
   dst.reinit (locally_owned_dofs,mpi_communicator);
   tmp.reinit (locally_owned_dofs,mpi_communicator);
+
+}
+
+template <typename VectorType>
+void PArpackSolver<VectorType>::reinit(const IndexSet &locally_owned_dofs,
+                                       const std::vector<IndexSet> &partitioning)
+{
+  internal_reinit(locally_owned_dofs);
+
+  // deal.II vectors:
+  src.reinit (partitioning,mpi_communicator);
+  dst.reinit (partitioning,mpi_communicator);
+  tmp.reinit (partitioning,mpi_communicator);
 
 }
 
@@ -526,19 +608,27 @@ void PArpackSolver<VectorType>::solve
  const unsigned int                  n_eigenvalues)
 {
 
-  Assert (n_eigenvalues <= eigenvectors.size(),
-          PArpackExcInvalidEigenvectorSize(n_eigenvalues, eigenvectors.size()));
+  if (additional_data.symmetric)
+    {
+      Assert (n_eigenvalues <= eigenvectors.size(),
+              PArpackExcInvalidEigenvectorSize(n_eigenvalues, eigenvectors.size()));
+    }
+  else
+    Assert (n_eigenvalues+1 <= eigenvectors.size(),
+            PArpackExcInvalidEigenvectorSizeNonsymmetric(n_eigenvalues, eigenvectors.size()));
 
   Assert (n_eigenvalues <= eigenvalues.size(),
           PArpackExcInvalidEigenvalueSize(n_eigenvalues, eigenvalues.size()));
 
 
-  Assert (n_eigenvalues < mass_matrix.m(),
-          PArpackExcInvalidNumberofEigenvalues(n_eigenvalues, mass_matrix.m()));
+  // use eigenvectors to get the problem size so that it is possible to
+  // employ LinearOperator for mass_matrix.
+  Assert (n_eigenvalues < eigenvectors[0].size(),
+          PArpackExcInvalidNumberofEigenvalues(n_eigenvalues, eigenvectors[0].size()));
 
-  Assert (additional_data.number_of_arnoldi_vectors < mass_matrix.m(),
+  Assert (additional_data.number_of_arnoldi_vectors < eigenvectors[0].size(),
           PArpackExcInvalidNumberofArnoldiVectors(
-            additional_data.number_of_arnoldi_vectors, mass_matrix.m()));
+            additional_data.number_of_arnoldi_vectors, eigenvectors[0].size()));
 
   Assert (additional_data.number_of_arnoldi_vectors > 2*n_eigenvalues+1,
           PArpackExcSmallNumberofArnoldiVectors(
@@ -631,12 +721,13 @@ void PArpackSolver<VectorType>::solve
   //  possibly from a previous run.
   // Typical choices in this situation might be to use the final value
   // of the starting vector from the previous eigenvalue calculation
-  int info = 1;
+  int info = initial_vector_provided? 1 : 0;
 
   // Number of eigenvalues of OP to be computed. 0 < NEV < N.
   int nev = n_eigenvalues;
   int n_inside_arpack = nloc;
 
+  // IDO = 99: done
   while (ido != 99)
     {
       // call of ARPACK pdnaupd routine
@@ -659,17 +750,17 @@ void PArpackSolver<VectorType>::solve
         {
           switch (ido)
             {
-//            compute  Y = OP * X  where
-//            IPNTR(1) is the pointer into WORKD for X,
-//            IPNTR(2) is the pointer into WORKD for Y.
             case -1:
+              // compute  Y = OP * X  where
+              // IPNTR(1) is the pointer into WORKD for X,
+              // IPNTR(2) is the pointer into WORKD for Y.
             {
               const int shift_x = ipntr[0]-1;
               const int shift_y = ipntr[1]-1;
               Assert (shift_x>=0, dealii::ExcInternalError() );
-              Assert (shift_x+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_x+nloc <= (int)workd.size(), dealii::ExcInternalError() );
               Assert (shift_y>=0, dealii::ExcInternalError() );
-              Assert (shift_y+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_y+nloc <= (int)workd.size(), dealii::ExcInternalError() );
 
               src = 0.0;
               src.add (nloc,
@@ -689,26 +780,26 @@ void PArpackSolver<VectorType>::solve
             }
             break;
 
-//            compute  Y = OP * X where
-//            IPNTR(1) is the pointer into WORKD for X,
-//            IPNTR(2) is the pointer into WORKD for Y.
-//            In mode 3,4 and 5, the vector B * X is already
-//            available in WORKD(ipntr(3)).  It does not
-//            need to be recomputed in forming OP * X.
             case  1:
+              // compute  Y = OP * X where
+              // IPNTR(1) is the pointer into WORKD for X,
+              // IPNTR(2) is the pointer into WORKD for Y.
+              // In mode 3,4 and 5, the vector B * X is already
+              // available in WORKD(ipntr(3)).  It does not
+              // need to be recomputed in forming OP * X.
             {
               const int shift_x   = ipntr[0]-1;
               const int shift_y   = ipntr[1]-1;
               const int shift_b_x = ipntr[2]-1;
 
               Assert (shift_x>=0, dealii::ExcInternalError() );
-              Assert (shift_x+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_x+nloc <= (int)workd.size(), dealii::ExcInternalError() );
               Assert (shift_y>=0, dealii::ExcInternalError() );
-              Assert (shift_y+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_y+nloc <= (int)workd.size(), dealii::ExcInternalError() );
               Assert (shift_b_x>=0, dealii::ExcInternalError() );
-              Assert (shift_b_x+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_b_x+nloc <= (int)workd.size(), dealii::ExcInternalError() );
               Assert (shift_y>=0, dealii::ExcInternalError() );
-              Assert (shift_y+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_y+nloc <= (int)workd.size(), dealii::ExcInternalError() );
 
               src = 0.0; // B*X
               src.add (nloc,
@@ -734,18 +825,18 @@ void PArpackSolver<VectorType>::solve
             }
             break;
 
-//            compute  Y = B * X  where
-//            IPNTR(1) is the pointer into WORKD for X,
-//            IPNTR(2) is the pointer into WORKD for Y.
             case  2:
+              // compute  Y = B * X  where
+              // IPNTR(1) is the pointer into WORKD for X,
+              // IPNTR(2) is the pointer into WORKD for Y.
             {
 
               const int shift_x = ipntr[0]-1;
               const int shift_y = ipntr[1]-1;
               Assert (shift_x>=0, dealii::ExcInternalError() );
-              Assert (shift_x+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_x+nloc <= (int)workd.size(), dealii::ExcInternalError() );
               Assert (shift_y>=0, dealii::ExcInternalError() );
-              Assert (shift_y+nloc <= workd.size(), dealii::ExcInternalError() );
+              Assert (shift_y+nloc <= (int)workd.size(), dealii::ExcInternalError() );
 
               src = 0.0;
               src.add (nloc,
@@ -765,20 +856,20 @@ void PArpackSolver<VectorType>::solve
             break;
 
             default:
-              Assert (false, PArpackExcIdo(ido));
+              AssertThrow (false, PArpackExcIdo(ido));
               break;
             }
         }
         break;
         default:
-          Assert (false, PArpackExcMode(mode));
+          AssertThrow (false, PArpackExcMode(mode));
           break;
         }
     }
 
   if (info<0)
     {
-      Assert (false, PArpackExcInfoPdnaupd(info));
+      AssertThrow (false, PArpackExcInfoPdnaupd(info));
     }
   else
     {
@@ -792,8 +883,8 @@ void PArpackSolver<VectorType>::solve
       double sigmar = shift_value; // real part of the shift
       double sigmai = 0.0; // imaginary part of the shift
 
-      std::vector<double> eigenvalues_real (n_eigenvalues, 0.);
-      std::vector<double> eigenvalues_im (n_eigenvalues, 0.);
+      std::vector<double> eigenvalues_real (n_eigenvalues+1, 0.);
+      std::vector<double> eigenvalues_im (n_eigenvalues+1, 0.);
 
       // call of ARPACK pdneupd routine
       if (additional_data.symmetric)
@@ -804,28 +895,28 @@ void PArpackSolver<VectorType>::solve
                  &iparam[0], &ipntr[0], &workd[0], &workl[0], &lworkl, &info);
       else
         pdneupd_(&mpi_communicator_fortran, &rvec, howmany, &select[0], &eigenvalues_real[0],
-                 &eigenvalues_im[0], &z[0], &ldz, &sigmar, &sigmai,
+                 &eigenvalues_im[0], &v[0], &ldz, &sigmar, &sigmai,
                  &workev[0], bmat, &n_inside_arpack, which, &nev, &tol,
                  &resid[0], &ncv, &v[0], &ldv,
                  &iparam[0], &ipntr[0], &workd[0], &workl[0], &lworkl, &info);
 
       if (info == 1)
         {
-          Assert (false, PArpackExcInfoMaxIt(control().max_steps()));
+          AssertThrow (false, PArpackExcInfoMaxIt(control().max_steps()));
         }
       else if (info == 3)
         {
-          Assert (false, PArpackExcNoShifts(1));
+          AssertThrow (false, PArpackExcNoShifts(1));
         }
       else if (info!=0)
         {
-          Assert (false, PArpackExcInfoPdneupd(info));
+          AssertThrow (false, PArpackExcInfoPdneupd(info));
         }
 
-      for (size_type i=0; i<n_eigenvalues; ++i)
+      for (int i=0; i<nev; ++i)
         {
           eigenvectors[i] = 0.0;
-          Assert (i*nloc + nloc <= v.size(), dealii::ExcInternalError() );
+          Assert (i*nloc + nloc <= (int)v.size(), dealii::ExcInternalError() );
 
           eigenvectors[i].add (nloc,
                                &local_indices[0],
@@ -838,8 +929,9 @@ void PArpackSolver<VectorType>::solve
                                                eigenvalues_im[i]);
     }
 
-  Assert (iparam[4] == n_eigenvalues,
-          PArpackExcConvergedEigenvectors(iparam[4], n_eigenvalues));
+  // Throw an error if the solver did not converge.
+  AssertThrow (iparam[4] >= (int)n_eigenvalues,
+               PArpackExcConvergedEigenvectors(n_eigenvalues,iparam[4]));
 
   // both PDNAUPD and PDSAUPD compute eigenpairs of inv[A - sigma*M]*M
   // with respect to a semi-inner product defined by M.

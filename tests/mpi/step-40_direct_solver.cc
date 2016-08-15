@@ -24,7 +24,7 @@
 #include <deal.II/lac/full_matrix.h>
 #include <deal.II/lac/solver_cg.h>
 #include <deal.II/lac/constraint_matrix.h>
-#include <deal.II/lac/compressed_simple_sparsity_pattern.h>
+#include <deal.II/lac/dynamic_sparsity_pattern.h>
 
 #include <deal.II/lac/petsc_parallel_sparse_matrix.h>
 #include <deal.II/lac/petsc_parallel_vector.h>
@@ -138,7 +138,7 @@ namespace Step40
                                       locally_relevant_dofs,
                                       mpi_communicator);
     system_rhs.reinit (locally_owned_dofs, mpi_communicator);
-    system_rhs = 0;
+    system_rhs = PetscScalar();
 
     constraints.clear ();
     constraints.reinit (locally_relevant_dofs);
@@ -149,9 +149,9 @@ namespace Step40
                                               constraints);
     constraints.close ();
 
-    CompressedSimpleSparsityPattern csp (dof_handler.n_dofs(),
-                                         dof_handler.n_dofs(),
-                                         locally_relevant_dofs);
+    DynamicSparsityPattern csp (dof_handler.n_dofs(),
+                                dof_handler.n_dofs(),
+                                locally_relevant_dofs);
     DoFTools::make_sparsity_pattern (dof_handler,
                                      csp,
                                      constraints, false);
@@ -182,8 +182,8 @@ namespace Step40
     const unsigned int   dofs_per_cell = fe.dofs_per_cell;
     const unsigned int   n_q_points    = quadrature_formula.size();
 
-    FullMatrix<double>   cell_matrix (dofs_per_cell, dofs_per_cell);
-    Vector<double>       cell_rhs (dofs_per_cell);
+    FullMatrix<PetscScalar>   cell_matrix (dofs_per_cell, dofs_per_cell);
+    Vector<PetscScalar>       cell_rhs (dofs_per_cell);
 
     std::vector<types::global_dof_index> local_dof_indices (dofs_per_cell);
 
@@ -193,8 +193,8 @@ namespace Step40
     for (; cell!=endc; ++cell)
       if (cell->is_locally_owned())
         {
-          cell_matrix = 0;
-          cell_rhs = 0;
+          cell_matrix = PetscScalar();
+          cell_rhs = PetscScalar();
 
           fe_values.reinit (cell);
 

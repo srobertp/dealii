@@ -23,7 +23,7 @@
 #  include <deal.II/lac/sparsity_pattern.h>
 #  include <deal.II/lac/dynamic_sparsity_pattern.h>
 #  include <deal.II/lac/sparsity_tools.h>
-#  include <deal.II/lac/parallel_vector.h>
+#  include <deal.II/lac/la_parallel_vector.h>
 
 DEAL_II_DISABLE_EXTRA_DIAGNOSTICS
 #  include <Epetra_Export.h>
@@ -1656,6 +1656,11 @@ namespace TrilinosWrappers
         Assert(n_columns <= (TrilinosWrappers::types::int_type)n_cols, ExcInternalError());
 
       }
+    // Exit early if there is nothing to do
+    if (n_columns == 0)
+      {
+        return;
+      }
 
     // If the calling processor owns the row to which we want to add values, we
     // can directly call the Epetra_CrsMatrix input function, which is much
@@ -2295,7 +2300,10 @@ namespace TrilinosWrappers
       // matrix that we got as a result.
       Epetra_CrsMatrix *C_mat;
       ML_Operator2EpetraCrsMatrix(C_, C_mat);
-      C_mat->FillComplete();
+      C_mat->FillComplete(mod_B->DomainMap(),
+                          transpose_left ?
+                          inputleft.trilinos_matrix().DomainMap() :
+                          inputleft.trilinos_matrix().RangeMap());
       C_mat->OptimizeStorage();
       result.reinit (*C_mat);
 
@@ -2492,8 +2500,8 @@ namespace TrilinosWrappers
   SparseMatrix::vmult (dealii::Vector<double> &,
                        const dealii::Vector<double> &) const;
   template void
-  SparseMatrix::vmult (dealii::parallel::distributed::Vector<double> &,
-                       const dealii::parallel::distributed::Vector<double> &) const;
+  SparseMatrix::vmult (dealii::LinearAlgebra::distributed::Vector<double> &,
+                       const dealii::LinearAlgebra::distributed::Vector<double> &) const;
   template void
   SparseMatrix::Tvmult (VectorBase &,
                         const VectorBase &) const;
@@ -2507,8 +2515,8 @@ namespace TrilinosWrappers
   SparseMatrix::Tvmult (dealii::Vector<double> &,
                         const dealii::Vector<double> &) const;
   template void
-  SparseMatrix::Tvmult (dealii::parallel::distributed::Vector<double> &,
-                        const dealii::parallel::distributed::Vector<double> &) const;
+  SparseMatrix::Tvmult (dealii::LinearAlgebra::distributed::Vector<double> &,
+                        const dealii::LinearAlgebra::distributed::Vector<double> &) const;
   template void
   SparseMatrix::vmult_add (VectorBase &,
                            const VectorBase &) const;
@@ -2522,8 +2530,8 @@ namespace TrilinosWrappers
   SparseMatrix::vmult_add (dealii::Vector<double> &,
                            const dealii::Vector<double> &) const;
   template void
-  SparseMatrix::vmult_add (dealii::parallel::distributed::Vector<double> &,
-                           const dealii::parallel::distributed::Vector<double> &) const;
+  SparseMatrix::vmult_add (dealii::LinearAlgebra::distributed::Vector<double> &,
+                           const dealii::LinearAlgebra::distributed::Vector<double> &) const;
   template void
   SparseMatrix::Tvmult_add (VectorBase &,
                             const VectorBase &) const;
@@ -2537,8 +2545,8 @@ namespace TrilinosWrappers
   SparseMatrix::Tvmult_add (dealii::Vector<double> &,
                             const dealii::Vector<double> &) const;
   template void
-  SparseMatrix::Tvmult_add (dealii::parallel::distributed::Vector<double> &,
-                            const dealii::parallel::distributed::Vector<double> &) const;
+  SparseMatrix::Tvmult_add (dealii::LinearAlgebra::distributed::Vector<double> &,
+                            const dealii::LinearAlgebra::distributed::Vector<double> &) const;
 }
 
 DEAL_II_NAMESPACE_CLOSE

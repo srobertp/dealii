@@ -45,7 +45,7 @@
 #include <deal.II/fe/fe_tools.h>
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/lac/sparsity_tools.h>
-#include <deal.II/lac/compressed_simple_sparsity_pattern.h>
+#include <deal.II/lac/dynamic_sparsity_pattern.h>
 #include <deal.II/hp/fe_values.h>
 
 #include <deal.II/lac/petsc_parallel_vector.h>
@@ -128,7 +128,7 @@ void test2cells(const unsigned int p1=2,
 #ifdef DEBUG_OUTPUT_VTK
   // output to check if all is good:
   counter++;
-  std::vector<Vector<double>> shape_functions;
+  std::vector<Vector<double> > shape_functions;
   std::vector<std::string> names;
   for (unsigned int s=0; s < dof_handler.n_dofs(); s++)
     {
@@ -152,7 +152,7 @@ void test2cells(const unsigned int p1=2,
       shape_functions.push_back(shape_function);
     }
 
-  DataOut<dim,hp::DoFHandler<dim>> data_out;
+  DataOut<dim,hp::DoFHandler<dim> > data_out;
   data_out.attach_dof_handler (dof_handler);
 
   // get material ids:

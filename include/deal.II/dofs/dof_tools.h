@@ -204,8 +204,7 @@ namespace DoFTools
   };
 
   /**
-   * @name Functions to support code that generically uses both DoFHandler and
-   * hp::DoFHandler
+   * @name Functions to support code that generically uses both DoFHandler and hp::DoFHandler
    * @{
    */
   /**
@@ -635,7 +634,7 @@ namespace DoFTools
    *
    * In fact, this function takes two such masks, one describing which
    * variables couple with each other in the cell integrals that make up your
-   * bilinear form, and which variables coupld with each other in the face
+   * bilinear form, and which variables couple with each other in the face
    * integrals. If you passed masks consisting of only 1s to both of these,
    * then you would get the same sparsity pattern as if you had called the
    * first of the make_sparsity_pattern() functions above. By setting some of
@@ -646,10 +645,28 @@ namespace DoFTools
    */
   template <typename DoFHandlerType, typename SparsityPatternType>
   void
-  make_flux_sparsity_pattern (const DoFHandlerType    &dof,
-                              SparsityPatternType     &sparsity,
-                              const Table<2,Coupling> &cell_integrals_mask,
-                              const Table<2,Coupling> &face_integrals_mask);
+  make_flux_sparsity_pattern (const DoFHandlerType      &dof,
+                              SparsityPatternType       &sparsity,
+                              const Table<2,Coupling>   &cell_integrals_mask,
+                              const Table<2,Coupling>   &face_integrals_mask,
+                              const types::subdomain_id  subdomain_id = numbers::invalid_subdomain_id);
+  /**
+   * This function does essentially the same as the previous
+   * make_flux_sparsity_pattern() function but allows the application of
+   * a constraint matrix. This is useful in the case where some components
+   * of a finite element are continuous and some discontinuous, allowing
+   * constraints to be imposed on the continuous part while also building
+   * the flux terms needed for the discontinuous part.
+   */
+  template <typename DoFHandlerType, typename SparsityPatternType>
+  void
+  make_flux_sparsity_pattern (const DoFHandlerType      &dof,
+                              SparsityPatternType       &sparsity,
+                              const ConstraintMatrix    &constraints,
+                              const bool                 keep_constrained_dofs,
+                              const Table<2,Coupling>   &couplings,
+                              const Table<2,Coupling>   &face_couplings,
+                              const types::subdomain_id  subdomain_id);
 
   /**
    * Create the sparsity pattern for boundary matrices. See the general
@@ -1164,8 +1181,7 @@ namespace DoFTools
    */
 
   /**
-   * @name Identifying subsets of degrees of freedom with particular
-   * properties
+   * @name Identifying subsets of degrees of freedom with particular properties
    * @{
    */
 
@@ -1295,17 +1311,18 @@ namespace DoFTools
    * parallel triangulations, then you need to use the other
    * DoFTools::extract_boundary_dofs function.
    *
-   * @param dof_handler The object that describes which degrees of freedom
+   * @param[in] dof_handler The object that describes which degrees of freedom
    * live on which cell
-   * @param component_mask A mask denoting the vector components of the finite
+   * @param[in] component_mask A mask denoting the vector components of the finite
    * element that should be considered (see also
    * @ref GlossComponentMask).
-   * @param selected_dofs The IndexSet object that is returned and that will
-   * contain the indices of degrees of freedom that are located on the
+   * @param[out] selected_dofs A vector of booleans that is returned and for which
+   * an element will be @p true if the corresponding index is a
+   * degree of freedom that is located on the
    * boundary (and correspond to the selected vector components and boundary
    * indicators, depending on the values of the @p component_mask and @p
    * boundary_ids arguments).
-   * @param boundary_ids If empty, this function extracts the indices of the
+   * @param[in] boundary_ids If empty, this function extracts the indices of the
    * degrees of freedom for all parts of the boundary. If it is a non- empty
    * list, then the function only considers boundary faces with the boundary
    * indicators listed in this argument.
@@ -1332,17 +1349,17 @@ namespace DoFTools
    * the locally relevant set (see
    * @ref GlossLocallyRelevantDof "locally relevant DoFs").
    *
-   * @param dof_handler The object that describes which degrees of freedom
+   * @param[in] dof_handler The object that describes which degrees of freedom
    * live on which cell
-   * @param component_mask A mask denoting the vector components of the finite
+   * @param[in] component_mask A mask denoting the vector components of the finite
    * element that should be considered (see also
    * @ref GlossComponentMask).
-   * @param selected_dofs The IndexSet object that is returned and that will
+   * @param[out] selected_dofs The IndexSet object that is returned and that will
    * contain the indices of degrees of freedom that are located on the
    * boundary (and correspond to the selected vector components and boundary
    * indicators, depending on the values of the @p component_mask and @p
    * boundary_ids arguments).
-   * @param boundary_ids If empty, this function extracts the indices of the
+   * @param[in] boundary_ids If empty, this function extracts the indices of the
    * degrees of freedom for all parts of the boundary. If it is a non- empty
    * list, then the function only considers boundary faces with the boundary
    * indicators listed in this argument.
@@ -1682,22 +1699,31 @@ namespace DoFTools
    */
   //@{
   /**
-   * Create an incidence matrix that for every cell on a given level of a
-   * multilevel DoFHandler flags which degrees of freedom are associated with
-   * the corresponding cell. This data structure is a matrix with as many rows
-   * as there are cells on a given level, as many columns as there are degrees
-   * of freedom on this level, and entries that are either true or false. This
-   * data structure is conveniently represented by a SparsityPattern object.
+   * Creates a sparsity pattern, which lists
+   * the degrees of freedom associated to each cell on the given
+   * level. This pattern can be used in RelaxationBlock classes as
+   * block list for additive and multiplicative Schwarz methods.
    *
-   * @note The ordering of rows (cells) follows the ordering of the standard
-   * cell iterators.
+   * The row index in this pattern is the cell index resulting from
+   * standard iteration through a level of the Triangulation. For a
+   * parallel::distributed::Triangulation, only locally owned cells
+   * are entered.
+   *
+   * The sparsity pattern is resized in this function to contain as
+   * many rows as there are locally owned cells on a given level, as
+   * many columns as there are degrees of freedom on this level.
+   *
+   * <tt>selected_dofs</tt> is a vector indexed by the local degrees
+   * of freedom on a cell. If it is used, only such dofs are entered
+   * into the block list which are selected. This allows for instance
+   * the exclusion of components or of dofs on the boundary.
    */
-  template <typename DoFHandlerType, class SparsityPatternType>
-  void make_cell_patches(SparsityPatternType     &block_list,
-                         const DoFHandlerType    &dof_handler,
+  template <int dim, int spacedim>
+  void make_cell_patches(SparsityPattern         &block_list,
+                         const DoFHandler<dim,spacedim> &dof_handler,
                          const unsigned int       level,
                          const std::vector<bool> &selected_dofs = std::vector<bool>(),
-                         types::global_dof_index  offset        = 0);
+                         const types::global_dof_index  offset        = 0);
 
   /**
    * Create an incidence matrix that for every vertex on a given level of a
@@ -1716,10 +1742,18 @@ namespace DoFTools
    * are possible, in particular changing <tt>boundary_patches</tt> for non-
    * essential boundary conditions.
    *
+   * This function returns the <tt>vertex_mapping</tt>,
+   * that contains the mapping from the vertex indices to the block indices
+   * of the <tt>block_list</tt>. For vertices that do not lead to a vertex patch, the
+   * entry in <tt>vertex_mapping</tt> contains the value <tt>invalid_unsigned_int</tt>.
+   * If <tt>invert_vertex_mapping</tt> is set to <tt>true</tt>, then the
+   * <tt>vertex_mapping</tt> is inverted such that it contains the mapping from
+   * the block indices to the corresponding vertex indices.
+   *
    * @arg <tt>block_list</tt>: the SparsityPattern into which the patches will
    * be stored.
    *
-   * @arg <tt>dof_handler</tt>: The multilevel dof handler providing the
+   * @arg <tt>dof_handler</tt>: the multilevel dof handler providing the
    * topology operated on.
    *
    * @arg <tt>interior_dofs_only</tt>: for each patch of cells around a
@@ -1736,15 +1770,45 @@ namespace DoFTools
    *
    * @arg <tt>single_cell_patches</tt>: if not true, patches containing a
    * single cell are eliminated.
+   *
+   * @arg <tt>invert_vertex_mapping</tt>: if true, then the return value
+   * contains one vertex index for each block; if false, then the return value
+   * contains one block index or <tt>invalid_unsigned_int</tt> for each vertex.
    */
   template <typename DoFHandlerType>
-  void make_vertex_patches(SparsityPattern      &block_list,
-                           const DoFHandlerType &dof_handler,
-                           const unsigned int    level,
-                           const bool            interior_dofs_only,
-                           const bool            boundary_patches       = false,
-                           const bool            level_boundary_patches = false,
-                           const bool            single_cell_patches    = false);
+  std::vector<unsigned int>
+  make_vertex_patches(SparsityPattern      &block_list,
+                      const DoFHandlerType &dof_handler,
+                      const unsigned int    level,
+                      const bool            interior_dofs_only,
+                      const bool            boundary_patches       = false,
+                      const bool            level_boundary_patches = false,
+                      const bool            single_cell_patches    = false,
+                      const bool            invert_vertex_mapping  = false);
+
+  /**
+   *  Same as above but allows boundary dofs on blocks to be excluded individually.
+   *
+   *  This is helpful if you want to use, for example, Taylor Hood elements
+   *  as it allows you to not include the boundary DoFs for the velocity
+   *  block on the patches while also letting you include the boundary DoFs
+   *  for the pressure block.
+   *
+   * @param exclude_boundary_dofs For each patch of cells around a
+   * vertex, collect all of the interior degrees of freedom of the patch and
+   * disregard those on the boundary of the patch if the boolean value for
+   * the corresponding block in the BlockMask is false.
+   */
+  template <typename DoFHandlerType>
+  std::vector<unsigned int>
+  make_vertex_patches(SparsityPattern      &block_list,
+                      const DoFHandlerType &dof_handler,
+                      const unsigned int    level,
+                      const BlockMask      &exclude_boundary_dofs  = BlockMask(),
+                      const bool            boundary_patches       = false,
+                      const bool            level_boundary_patches = false,
+                      const bool            single_cell_patches    = false,
+                      const bool            invert_vertex_mapping  = false);
 
   /**
    * Create an incidence matrix that for every cell on a given level of a

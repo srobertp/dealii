@@ -1,6 +1,6 @@
 ## ---------------------------------------------------------------------
 ##
-## Copyright (C) 2013 - 2015 by the deal.II authors
+## Copyright (C) 2013 - 2016 by the deal.II authors
 ##
 ## This file is part of the deal.II library.
 ##
@@ -268,7 +268,7 @@ ENDIF()
 GET_CMAKE_PROPERTY(_variables VARIABLES)
 FOREACH(_var ${_variables})
   IF( _var MATCHES "^(TEST|DEAL_II|ALLOW|WITH|FORCE|COMPONENT)_" OR
-      _var MATCHES "^(DOCUMENTATION|EXAMPLES|PARAMETER_GUI)" OR
+      _var MATCHES "^(DOCUMENTATION|EXAMPLES)" OR
       _var MATCHES "^(ARPACK|BOOST|OPENCASCADE|MUPARSER|HDF5|METIS|MPI)_" OR
       _var MATCHES "^(NETCDF|P4EST|PETSC|SLEPC|THREADS|TBB|TRILINOS)_" OR
       _var MATCHES "^(UMFPACK|ZLIB|LAPACK|MUPARSER)_" OR
@@ -521,27 +521,6 @@ IF(NOT EXISTS ${_path})
 Unable to determine test submission files from TAG. Bailing out.
 "
     )
-ENDIF()
-
-IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
-  #
-  # Only use the following sed command on GNU userlands:
-  #
-  # TODO: Come up with a more robust way to inject this that also works on
-  # BSD and Mac
-  #
-  FILE(GLOB _xml_files ${_path}/*.xml)
-  EXECUTE_PROCESS(COMMAND sed -i -e
-    s/CompilerName=\\"\\"/CompilerName=\\"${_compiler_name}\\"\\n\\tCompilerVersion=\\"${_compiler_version}\\"/g
-    ${_xml_files}
-    OUTPUT_QUIET RESULT_VARIABLE  _res
-    )
-  IF(NOT "${_res}" STREQUAL "0")
-    MESSAGE(FATAL_ERROR "
-  \"sed\" failed. Bailing out.
-  "
-      )
-  ENDIF()
 ENDIF()
 
 FILE(WRITE ${_path}/Update.xml

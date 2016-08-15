@@ -16,8 +16,8 @@
 
 #include <deal.II/lac/vector.h>
 #include <deal.II/lac/block_vector.h>
-#include <deal.II/lac/parallel_vector.h>
-#include <deal.II/lac/parallel_block_vector.h>
+#include <deal.II/lac/la_parallel_vector.h>
+#include <deal.II/lac/la_parallel_block_vector.h>
 #include <deal.II/lac/petsc_vector.h>
 #include <deal.II/lac/petsc_block_vector.h>
 #include <deal.II/lac/trilinos_vector.h>
@@ -191,11 +191,6 @@ void PointValueHistory<dim>
   // points locations are dofs locations
   AssertThrow (dof_handler->get_fe ().has_support_points (), ExcNotImplemented ());
 
-  // FEValues object to extract quadrature
-  // points from
-  std::vector <Point <dim> >
-  unit_support_points = dof_handler->get_fe ().get_unit_support_points ();
-
   // While in general quadrature points seems
   // to refer to Gauss quadrature points, in
   // this case the quadrature points are
@@ -341,10 +336,6 @@ void PointValueHistory<dim>
   // Implementation assumes that support
   // points locations are dofs locations
   AssertThrow (dof_handler->get_fe ().has_support_points (), ExcNotImplemented ());
-
-  // FEValues object to extract quadrature
-  // points from
-  std::vector <Point <dim> > unit_support_points = dof_handler->get_fe ().get_unit_support_points ();
 
   // While in general quadrature points seems
   // to refer to Gauss quadrature points, in
@@ -899,7 +890,8 @@ void PointValueHistory<dim>
 
 template <int dim>
 void PointValueHistory<dim>
-::write_gnuplot (const std::string &base_name, const std::vector <Point <dim> > postprocessor_locations)
+::write_gnuplot (const std::string &base_name,
+                 const std::vector <Point <dim> > &postprocessor_locations)
 {
   AssertThrow (closed, ExcInvalidState ());
   AssertThrow (!cleared, ExcInvalidState ());

@@ -1,6 +1,6 @@
 ## ---------------------------------------------------------------------
 ##
-## Copyright (C) 2012 - 2015 by the deal.II authors
+## Copyright (C) 2012 - 2016 by the deal.II authors
 ##
 ## This file is part of the deal.II library.
 ##
@@ -149,8 +149,9 @@ ENDIF()
 ADD_SUBDIRECTORY(source) # has to be included after bundled
 
 ADD_SUBDIRECTORY(cmake/config) # has to be included after source
-ADD_SUBDIRECTORY(contrib) # has to be included after source
 ADD_SUBDIRECTORY(examples)
+
+ADD_SUBDIRECTORY(contrib/python-bindings)
 
 IF(DEAL_II_HAVE_TESTS_DIRECTORY)
   ADD_SUBDIRECTORY(tests)

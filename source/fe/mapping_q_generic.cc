@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------
 //
-// Copyright (C) 2000 - 2015 by the deal.II authors
+// Copyright (C) 2000 - 2016 by the deal.II authors
 //
 // This file is part of the deal.II library.
 //
@@ -764,27 +764,30 @@ initialize_face (const UpdateFlags      update_flags,
         {
           aux.resize (dim-1, std::vector<Tensor<1,spacedim> > (n_original_q_points));
 
-          // Compute tangentials to the
-          // unit cell.
-          const unsigned int nfaces = GeometryInfo<dim>::faces_per_cell;
-          unit_tangentials.resize (nfaces*(dim-1),
-                                   std::vector<Tensor<1,dim> > (n_original_q_points));
-          if (dim==2)
+          // Compute tangentials to the unit cell.
+          for (unsigned int i=0; i<unit_tangentials.size(); ++i)
+            unit_tangentials[i].resize (n_original_q_points);
+          switch (dim)
             {
-              // ensure a counterclockwise
-              // orientation of tangentials
+            case 2:
+            {
+              // ensure a counterclockwise orientation of tangentials
               static const int tangential_orientation[4]= {-1,1,1,-1};
-              for (unsigned int i=0; i<nfaces; ++i)
+              for (unsigned int i=0; i<GeometryInfo<dim>::faces_per_cell; ++i)
                 {
                   Tensor<1,dim> tang;
-                  tang[1-i/2]=tangential_orientation[i];
+                  tang[1-i/2] = tangential_orientation[i];
                   std::fill (unit_tangentials[i].begin(),
-                             unit_tangentials[i].end(), tang);
+                             unit_tangentials[i].end(),
+                             tang);
                 }
+
+              break;
             }
-          else if (dim==3)
+
+            case 3:
             {
-              for (unsigned int i=0; i<nfaces; ++i)
+              for (unsigned int i=0; i<GeometryInfo<dim>::faces_per_cell; ++i)
                 {
                   Tensor<1,dim> tang1, tang2;
 
@@ -806,10 +809,18 @@ initialize_face (const UpdateFlags      update_flags,
                   // for all quadrature
                   // points on this face
                   std::fill (unit_tangentials[i].begin(),
-                             unit_tangentials[i].end(), tang1);
-                  std::fill (unit_tangentials[nfaces+i].begin(),
-                             unit_tangentials[nfaces+i].end(), tang2);
+                             unit_tangentials[i].end(),
+                             tang1);
+                  std::fill (unit_tangentials[GeometryInfo<dim>::faces_per_cell+i].begin(),
+                             unit_tangentials[GeometryInfo<dim>::faces_per_cell+i].end(),
+                             tang2);
                 }
+
+              break;
+            }
+
+            default:
+              Assert (false, ExcNotImplemented());
             }
         }
     }
@@ -2531,20 +2542,18 @@ fill_fe_values (const typename Triangulation<dim,spacedim>::cell_iterator &cell,
 
   const unsigned int n_q_points=quadrature.size();
 
-  // if necessary, recompute the support points of the transformation of this cell
-  // (note that we need to first check the triangulation pointer, since otherwise
-  // the second test might trigger an exception if the triangulations are not the
-  // same)
-  if ((data.mapping_support_points.size() == 0)
-      ||
-      (&cell->get_triangulation() !=
-       &data.cell_of_current_support_points->get_triangulation())
-      ||
-      (cell != data.cell_of_current_support_points))
-    {
-      data.mapping_support_points = this->compute_mapping_support_points(cell);
-      data.cell_of_current_support_points = cell;
-    }
+  // recompute the support points of the transformation of this
+  // cell. we tried to be clever here in an earlier version of the
+  // library by checking whether the cell is the same as the one we
+  // had visited last, but it turns out to be difficult to determine
+  // that because a cell for the purposes of a mapping is
+  // characterized not just by its (triangulation, level, index)
+  // triple, but also by the locations of its vertices, the manifold
+  // object attached to the cell and all of its bounding faces/edges,
+  // etc. to reliably test that the "cell" we are on is, therefore,
+  // not easily done
+  data.mapping_support_points = this->compute_mapping_support_points(cell);
+  data.cell_of_current_support_points = cell;
 
   internal::maybe_compute_q_points<dim,spacedim> (QProjector<dim>::DataSetDescriptor::cell (),
                                                   data,
@@ -2614,12 +2623,16 @@ fill_fe_values (const typename Triangulation<dim,spacedim>::cell_iterator &cell,
                   }
                 else
                   {
-                    const unsigned int codim = spacedim-dim;
-                    (void)codim;
-
                     if (update_flags & update_normal_vectors)
                       {
-                        Assert( codim==1 , ExcMessage("There is no cell normal in codim 2."));
+                        Assert(spacedim == dim+1,
+                               ExcMessage("There is no (unique) cell normal for "
+                                          + Utilities::int_to_string(dim) +
+                                          "-dimensional cells in "
+                                          + Utilities::int_to_string(spacedim) +
+                                          "-dimensional space. This only works if the "
+                                          "space dimension is one greater than the "
+                                          "dimensionality of the mesh cells."));
 
                         if (dim==1)
                           output_data.normal_vectors[point] =
@@ -3464,7 +3477,7 @@ namespace
       {
       case 2:
       {
-        // If two points are passed, these are the two vertices, and
+        // If two points are passed, these are the two vertices, so
         // we can only compute degree-1 intermediate points.
         for (unsigned int i=0; i<n; ++i)
           {
@@ -3485,30 +3498,57 @@ namespace
         // is n a square number
         Assert(m*m==n, ExcInternalError());
 
-        // If four points are passed, these are the two vertices, and
-        // we can only compute (degree-1)*(degree-1) intermediate
-        // points.
-        for (unsigned int i=0; i<m; ++i)
+        // If m points are passed, two of them are the outer vertices, and we
+        // can only compute (degree-1)*(degree-1) intermediate points.
+        Point<2> p;
+        for (unsigned int i=0, c=0; i<m; ++i)
           {
-            const double y=line_support_points.point(1+i)[0];
-            for (unsigned int j=0; j<m; ++j)
+            p[1] = line_support_points.point(1+i)[0];
+            for (unsigned int j=0; j<m; ++j, ++c)
               {
-                const double x=line_support_points.point(1+j)[0];
+                p[0] = line_support_points.point(1+j)[0];
 
-                w[0] = (1-x)*(1-y);
-                w[1] =     x*(1-y);
-                w[2] = (1-x)*y    ;
-                w[3] =     x*y    ;
+                for (unsigned int l=0; l<4; ++l)
+                  w[l] = GeometryInfo<2>::d_linear_shape_function(p, l);
+
                 Quadrature<spacedim> quadrature(surrounding_points, w);
-                points[i*m+j]=manifold.get_new_point(quadrature);
+                points[c]=manifold.get_new_point(quadrature);
               }
           }
         break;
       }
 
       case 8:
-        Assert(false, ExcNotImplemented());
+      {
+        Assert(spacedim >= 3, ExcImpossibleInDim(spacedim));
+        unsigned int m=1;
+        for ( ; m < n; ++m)
+          if (m*m*m == n)
+            break;
+        // is n a cube number
+        Assert(m*m*m==n, ExcInternalError());
+
+        Point<3> p;
+        for (unsigned int k=0, c=0; k<m; ++k)
+          {
+            p[2] = line_support_points.point(1+k)[0];
+            for (unsigned int i=0; i<m; ++i)
+              {
+                p[1] = line_support_points.point(1+i)[0];
+                for (unsigned int j=0; j<m; ++j, ++c)
+                  {
+                    p[0] = line_support_points.point(1+j)[0];
+
+                    for (unsigned int l=0; l<8; ++l)
+                      w[l] = GeometryInfo<3>::d_linear_shape_function(p, l);
+
+                    Quadrature<spacedim> quadrature(surrounding_points, w);
+                    points[c]=manifold.get_new_point(quadrature);
+                  }
+              }
+          }
         break;
+      }
       default:
         Assert(false, ExcInternalError());
         break;
@@ -3679,10 +3719,7 @@ MappingQGeneric<3,3>::
 add_quad_support_points(const Triangulation<3,3>::cell_iterator &cell,
                         std::vector<Point<3> >                &a) const
 {
-  const unsigned int faces_per_cell    = GeometryInfo<3>::faces_per_cell,
-                     vertices_per_face = GeometryInfo<3>::vertices_per_face,
-                     lines_per_face    = GeometryInfo<3>::lines_per_face,
-                     vertices_per_cell = GeometryInfo<3>::vertices_per_cell;
+  const unsigned int faces_per_cell    = GeometryInfo<3>::faces_per_cell;
 
   static const StraightBoundary<3> straight_boundary;
   // used if face quad at boundary or entirely in the interior of the domain
@@ -3705,6 +3742,9 @@ add_quad_support_points(const Triangulation<3,3>::cell_iterator &cell,
                  face_rotation    = cell->face_rotation   (face_no);
 
 #ifdef DEBUG
+      const unsigned int vertices_per_face = GeometryInfo<3>::vertices_per_face,
+                         lines_per_face    = GeometryInfo<3>::lines_per_face;
+
       // some sanity checks up front
       for (unsigned int i=0; i<vertices_per_face; ++i)
         Assert(face->vertex_index(i)==cell->vertex_index(
@@ -3722,90 +3762,19 @@ add_quad_support_points(const Triangulation<3,3>::cell_iterator &cell,
                ExcInternalError());
 #endif
 
-      // if face at boundary, then ask boundary object to return intermediate
-      // points on it
-      if (face->at_boundary())
-        {
-          get_intermediate_points_on_object(face->get_manifold(), line_support_points, face, quad_points);
+      // ask the boundary/manifold object to return intermediate points on it
+      get_intermediate_points_on_object(face->get_manifold(), line_support_points,
+                                        face, quad_points);
 
-          // in 3D, the orientation, flip and rotation of the face might not
-          // match what we expect here, namely the standard orientation. thus
-          // reorder points accordingly. since a Mapping uses the same shape
-          // function as an FE_Q, we can ask a FE_Q to do the reordering for us.
-          for (unsigned int i=0; i<quad_points.size(); ++i)
-            a.push_back(quad_points[fe_q->adjust_quad_dof_index_for_face_orientation(i,
-                                    face_orientation,
-                                    face_flip,
-                                    face_rotation)]);
-        }
-      else
-        {
-          // face is not at boundary, but maybe some of its lines are. count
-          // them
-          unsigned int lines_at_boundary=0;
-          for (unsigned int i=0; i<lines_per_face; ++i)
-            if (face->line(i)->at_boundary())
-              ++lines_at_boundary;
-
-          Assert(lines_at_boundary<=lines_per_face, ExcInternalError());
-
-          // if at least one of the lines bounding this quad is at the
-          // boundary, then collect points separately
-          if (lines_at_boundary>0)
-            {
-              // call of function add_weighted_interior_points increases size of b
-              // about 1. There resize b for the case the mentioned function
-              // was already called.
-              b.resize(4*polynomial_degree);
-
-              // b is of size 4*degree, make sure that this is the right size
-              Assert(b.size()==vertices_per_face+lines_per_face*(polynomial_degree-1),
-                     ExcDimensionMismatch(b.size(),
-                                          vertices_per_face+lines_per_face*(polynomial_degree-1)));
-
-              // sort the points into b. We used access from the cell (not
-              // from the face) to fill b, so we can assume a standard face
-              // orientation. Doing so, the calculated points will be in
-              // standard orientation as well.
-              for (unsigned int i=0; i<vertices_per_face; ++i)
-                b[i]=a[GeometryInfo<3>::face_to_cell_vertices(face_no, i)];
-
-              for (unsigned int i=0; i<lines_per_face; ++i)
-                for (unsigned int j=0; j<polynomial_degree-1; ++j)
-                  b[vertices_per_face+i*(polynomial_degree-1)+j]=
-                    a[vertices_per_cell + GeometryInfo<3>::face_to_cell_lines(
-                        face_no, i)*(polynomial_degree-1)+j];
-
-              // Now b includes the support points on the quad and we can
-              // apply the laplace vector
-              add_weighted_interior_points (support_point_weights_on_quad, b);
-              AssertDimension (b.size(),
-                               4*this->polynomial_degree +
-                               (this->polynomial_degree-1)*(this->polynomial_degree-1));
-
-              for (unsigned int i=0; i<(polynomial_degree-1)*(polynomial_degree-1); ++i)
-                a.push_back(b[4*polynomial_degree+i]);
-            }
-          else
-            {
-              // face is entirely in the interior. get intermediate
-              // points from the relevant manifold object.
-              vertices.resize(4);
-              for (unsigned int i=0; i<4; ++i)
-                vertices[i] = face->vertex(i);
-              get_intermediate_points (face->get_manifold(), line_support_points, vertices, quad_points);
-              // in 3D, the orientation, flip and rotation of the face might
-              // not match what we expect here, namely the standard
-              // orientation. thus reorder points accordingly. since a Mapping
-              // uses the same shape function as an FE_Q, we can ask a FE_Q to
-              // do the reordering for us.
-              for (unsigned int i=0; i<quad_points.size(); ++i)
-                a.push_back(quad_points[fe_q->adjust_quad_dof_index_for_face_orientation(i,
-                                        face_orientation,
-                                        face_flip,
-                                        face_rotation)]);
-            }
-        }
+      // in 3D, the orientation, flip and rotation of the face might not
+      // match what we expect here, namely the standard orientation. thus
+      // reorder points accordingly. since a Mapping uses the same shape
+      // function as an FE_Q, we can ask a FE_Q to do the reordering for us.
+      for (unsigned int i=0; i<quad_points.size(); ++i)
+        a.push_back(quad_points[fe_q->adjust_quad_dof_index_for_face_orientation(i,
+                                face_orientation,
+                                face_flip,
+                                face_rotation)]);
     }
 }
 
@@ -3862,6 +3831,15 @@ compute_mapping_support_points(const typename Triangulation<dim,spacedim>::cell_
         // manifold, otherwise compute them from the points around it
         if (dim != spacedim)
           add_quad_support_points(cell, a);
+        // TODO: use get_intermediate_points_on_object for the else case
+        // unconditionally as soon as the interface of Boundary is fixed
+        else if (dynamic_cast<const Boundary<dim,spacedim> *>(&cell->get_manifold()) == NULL)
+          {
+            std::vector<Point<spacedim> > quad_points (Utilities::fixed_power<dim>(polynomial_degree-1));
+            get_intermediate_points_on_object(cell->get_manifold(), line_support_points, cell, quad_points);
+            for (unsigned int i=0; i<quad_points.size(); ++i)
+              a.push_back(quad_points[i]);
+          }
         else
           add_weighted_interior_points (support_point_weights_on_quad, a);
         break;
@@ -3873,7 +3851,16 @@ compute_mapping_support_points(const typename Triangulation<dim,spacedim>::cell_
         add_quad_support_points (cell, a);
 
         // then compute the interior points
-        add_weighted_interior_points (support_point_weights_on_hex, a);
+        // TODO: remove else case as soon as boundary is fixed
+        if (dynamic_cast<const Boundary<dim,spacedim> *>(&cell->get_manifold()) == NULL)
+          {
+            std::vector<Point<spacedim> > hex_points (Utilities::fixed_power<dim>(polynomial_degree-1));
+            get_intermediate_points_on_object(cell->get_manifold(), line_support_points, cell, hex_points);
+            for (unsigned int i=0; i<hex_points.size(); ++i)
+              a.push_back(hex_points[i]);
+          }
+        else
+          add_weighted_interior_points (support_point_weights_on_hex, a);
         break;
       }
 

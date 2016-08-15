@@ -110,27 +110,36 @@ namespace LinearAlgebra
     /**
      * Multiply the entire vector by a fixed factor.
      */
-    virtual VectorSpaceVector<Number> &operator*= (const Number factor);
+    virtual Vector<Number> &operator*= (const Number factor);
 
     /**
      * Divide the entire vector by a fixed factor.
      */
-    virtual VectorSpaceVector<Number> &operator/= (const Number factor);
+    virtual Vector<Number> &operator/= (const Number factor);
 
     /**
      * Add the vector @p V to the present one.
      */
-    virtual VectorSpaceVector<Number> &operator+= (const VectorSpaceVector<Number> &V);
+    virtual Vector<Number> &operator+= (const VectorSpaceVector<Number> &V);
 
     /**
-     * Substract the vector @p V from the present one.
+     * Subtract the vector @p V from the present one.
      */
-    virtual VectorSpaceVector<Number> &operator-= (const VectorSpaceVector<Number> &V);
+    virtual Vector<Number> &operator-= (const VectorSpaceVector<Number> &V);
 
     /**
      * Return the scalar product of two vectors.
      */
-    virtual Number operator* (const VectorSpaceVector<Number> &V);
+    virtual Number operator* (const VectorSpaceVector<Number> &V) const;
+
+    /**
+     * This function is not implemented and will throw an exception.
+     */
+    virtual void import(const ReadWriteVector<Number> &V,
+                        VectorOperation::values operation,
+                        std_cxx11::shared_ptr<const CommunicationPatternBase>
+                        communication_pattern =
+                          std_cxx11::shared_ptr<const CommunicationPatternBase>());
 
     /**
      * Add @p a to all components. Note that @p a is a scalar not a vector.
@@ -159,12 +168,12 @@ namespace LinearAlgebra
     /**
      * Scale each element of this vector by the corresponding element in the
      * argument. This function is mostly meant to simulate multiplication (and
-     * immediate re-assignement) by a diagonal scaling matrix.
+     * immediate re-assignment) by a diagonal scaling matrix.
      */
     virtual void scale(const VectorSpaceVector<Number> &scaling_factors);
 
     /**
-     * Assignement <tt>*this = a*V</tt>.
+     * Assignment <tt>*this = a*V</tt>.
      */
     virtual void equ(const Number a, const VectorSpaceVector<Number> &V);
 
@@ -172,19 +181,19 @@ namespace LinearAlgebra
      * Return the l<sub>1</sub> norm of the vector (i.e., the sum of the
      * absolute values of all entries).
      */
-    virtual typename VectorSpaceVector<Number>::real_type l1_norm();
+    virtual typename VectorSpaceVector<Number>::real_type l1_norm() const;
 
     /**
      * Return the l<sub>2</sub> norm of the vector (i.e., the square root of
      * the sum of the square of all entries among all processors).
      */
-    virtual typename VectorSpaceVector<Number>::real_type l2_norm();
+    virtual typename VectorSpaceVector<Number>::real_type l2_norm() const;
 
     /**
      * Return the maximum norm of the vector (i.e., the maximum absolute value
      * among all entries and among all processors).
      */
-    virtual typename VectorSpaceVector<Number>::real_type linfty_norm();
+    virtual typename VectorSpaceVector<Number>::real_type linfty_norm() const;
 
     /**
      * Perform a combined operation of a vector addition and a subsequent
@@ -203,7 +212,7 @@ namespace LinearAlgebra
      * Return the global size of the vector, equal to the sum of the number of
      * locally owned indices among all processors.
      */
-    size_type size() const;
+    virtual size_type size() const;
 
     /**
      * Return an index set that describes which elements of this vector are
@@ -216,7 +225,7 @@ namespace LinearAlgebra
      *  vec.locally_owned_elements() == complete_index_set(vec.size())
      * @endcode
      */
-    const dealii::IndexSet &locally_owned_elements() const;
+    virtual dealii::IndexSet locally_owned_elements() const;
 
     /**
      * Prints the vector to the output stream @p out.
@@ -248,7 +257,7 @@ namespace LinearAlgebra
     /**
      * Returns the memory consumption of this class in bytes.
      */
-    std::size_t memory_consumption() const;
+    virtual std::size_t memory_consumption() const;
 
     /**
      * Attempt to perform an operation between two incompatible vector types.
@@ -259,23 +268,6 @@ namespace LinearAlgebra
 
   private:
     /**
-     * Compute the L1 norm in a recursive way by dividing the vector on
-     * smaller and smaller intervals. This reduces the numerical error on
-     * large vector.
-     */
-    typename VectorSpaceVector<Number>::real_type l1_norm_recursive(unsigned int i,
-        unsigned int j);
-
-    /**
-     * Compute the squared L2 norm in a recursive way by dividing the vector
-     * on smaller and smaller intervals. This reduces the numerical error on
-     * large vector.
-     */
-    typename VectorSpaceVector<Number>::real_type l2_norm_squared_recursive(
-      unsigned int i,
-      unsigned int j);
-
-    /**
      * Serialize the data of this object using boost. This function is
      * necessary to use boost::archive::text_iarchive and
      * boost::archive::text_oarchive.
@@ -284,6 +276,11 @@ namespace LinearAlgebra
     void serialize(Archive &ar, const unsigned int version);
 
     friend class boost::serialization::access;
+
+    /**
+     * Make all other ReadWriteVector types friends.
+     */
+    template <typename Number2> friend class Vector;
   };
 
   /*@}*/
@@ -332,56 +329,6 @@ namespace LinearAlgebra
 
   template <typename Number>
   inline
-  Vector<Number> &Vector<Number>::operator= (const Vector<Number> &in_vector)
-  {
-    this->reinit(in_vector.size(),true);
-    std::copy(in_vector.begin(), in_vector.end(), this->begin());
-
-    return *this;
-  }
-
-
-
-  template <typename Number>
-  template <typename Number2>
-  inline
-  Vector<Number> &Vector<Number>::operator= (const Vector<Number2> &in_vector)
-  {
-    this->reinit(in_vector.size(in_vector.size()),true);
-    std::copy(in_vector.begin(), in_vector.end(), this->begin());
-
-    return *this;
-  }
-
-
-
-  template <typename Number>
-  inline
-  Vector<Number> &Vector<Number>::operator= (const Number s)
-  {
-    Assert(s==static_cast<Number>(0), ExcMessage("Only 0 can be assigned to a vector."));
-    (void) s;
-
-    std::fill(this->begin(),this->end(),Number());
-
-    return *this;
-  }
-
-
-
-  template <typename Number>
-  inline
-  void Vector<Number>::add(const Number a)
-  {
-    AssertIsFinite(a);
-    for (unsigned int i=0; i<this->size(); ++i)
-      this->val[i] += a;
-  }
-
-
-
-  template <typename Number>
-  inline
   typename Vector<Number>::size_type Vector<Number>::size() const
   {
     return ReadWriteVector<Number>::size();
@@ -391,9 +338,9 @@ namespace LinearAlgebra
 
   template <typename Number>
   inline
-  const dealii::IndexSet &Vector<Number>::locally_owned_elements() const
+  dealii::IndexSet Vector<Number>::locally_owned_elements() const
   {
-    return ReadWriteVector<Number>::get_stored_elements();
+    return IndexSet(ReadWriteVector<Number>::get_stored_elements());
   }
 
 
@@ -415,7 +362,7 @@ namespace LinearAlgebra
   inline
   void Vector<Number>::serialize(Archive &ar, const unsigned int)
   {
-    unsigned int current_size = this->size();
+    size_type current_size = this->size();
     ar &static_cast<Subscriptor &>(*this);
     ar &this->stored_elements;
     // If necessary, resize the vector during a read operation

@@ -13,6 +13,7 @@
 //
 // ---------------------------------------------------------------------
 
+#include <deal.II/base/mpi.h>
 #include <deal.II/lac/petsc_parallel_vector.h>
 
 #ifdef DEAL_II_WITH_PETSC
@@ -321,6 +322,7 @@ namespace PETScWrappers
         PetscInt begin, end;
 
         ierr = VecGetOwnershipRange (vector, &begin, &end);
+        AssertThrow (ierr == 0, ExcPETScError(ierr));
 
         Assert(local_size==(size_type)(end-begin), ExcInternalError());
 

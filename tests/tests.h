@@ -1,6 +1,6 @@
 // ---------------------------------------------------------------------
 //
-// Copyright (C) 2004 - 2015 by the deal.II authors
+// Copyright (C) 2004 - 2016 by the deal.II authors
 //
 // This file is part of the deal.II library.
 //
@@ -21,6 +21,7 @@
 #include <deal.II/base/config.h>
 #include <deal.II/base/job_identifier.h>
 #include <deal.II/base/logstream.h>
+#include <deal.II/base/mpi.h>
 #include <deal.II/base/exceptions.h>
 #include <deal.II/base/utilities.h>
 #include <deal.II/base/thread_management.h>
@@ -64,13 +65,41 @@ using namespace dealii;
 
 // ------------------------------ Utility functions used in tests -----------------------
 
+/**
+ * A function to return real part of the number and check that
+ * its imaginary part is zero.
+ */
+#ifdef DEAL_II_WITH_PETSC
+#include <deal.II/lac/petsc_vector_base.h>
+PetscReal get_real_assert_zero_imag(const PETScWrappers::internal::VectorReference &a)
+{
+  Assert (a.imag() == 0.0, ExcInternalError());
+  return a.real();
+}
+#endif
+
+template<typename number>
+number get_real_assert_zero_imag(const std::complex<number> &a)
+{
+  Assert (a.imag() == 0.0, ExcInternalError());
+  return a.real();
+}
+
+template<typename number>
+number get_real_assert_zero_imag(const number &a)
+{
+  return a;
+}
+
+
 // Cygwin has a different implementation for rand() which causes many tests to fail.
 // This here is a reimplementation that gives the same sequence of numbers as a program
 // that uses rand() on a typical linux machine.
 // we put this into a namespace to not conflict with stdlib
 namespace Testing
 {
-  int rand(bool reseed=false, int seed=1) throw()
+  int rand(const bool reseed=false,
+           const int seed=1)
   {
     static int r[32];
     static int k;
@@ -110,7 +139,7 @@ namespace Testing
   }
 
 // reseed our random number generator
-  void srand(int seed) throw()
+  void srand(const int seed)
   {
     rand(true, seed);
   }
@@ -282,8 +311,7 @@ initlog(bool console=false)
   deallogname = "output";
   deallogfile.open(deallogname.c_str());
   deallog.attach(deallogfile);
-  if (!console)
-    deallog.depth_console(0);
+  deallog.depth_console(console?10:0);
 
 //TODO: Remove this line and replace by test_mode()
   deallog.threshold_float(1.e-8);
@@ -301,8 +329,7 @@ mpi_initlog(bool console=false)
       deallogname = "output";
       deallogfile.open(deallogname.c_str());
       deallog.attach(deallogfile);
-      if (!console)
-        deallog.depth_console(0);
+      deallog.depth_console(console?10:0);
 
 //TODO: Remove this line and replace by test_mode()
       deallog.threshold_float(1.e-8);
@@ -328,8 +355,7 @@ struct MPILogInitAll
       deallogname = deallogname + Utilities::int_to_string(myid);
     deallogfile.open(deallogname.c_str());
     deallog.attach(deallogfile);
-    if (!console)
-      deallog.depth_console(0);
+    deallog.depth_console(console?10:0);
 
 //TODO: Remove this line and replace by test_mode()
     deallog.threshold_float(1.e-8);

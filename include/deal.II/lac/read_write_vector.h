@@ -29,8 +29,21 @@
 #include <cstring>
 #include <iomanip>
 
+#ifdef DEAL_II_WITH_TRILINOS
+#include <deal.II/lac/trilinos_epetra_communication_pattern.h>
+#include "Epetra_MultiVector.h"
+#endif
 
 DEAL_II_NAMESPACE_OPEN
+
+namespace LinearAlgebra
+{
+  class CommunicationPatternBase;
+  namespace distributed
+  {
+    template <typename> class Vector;
+  }
+}
 
 #ifdef DEAL_II_WITH_PETSC
 namespace PETScWrappers
@@ -46,6 +59,14 @@ namespace PETScWrappers
 namespace TrilinosWrappers
 {
   namespace MPI
+  {
+    class Vector;
+  }
+}
+
+namespace LinearAlgebra
+{
+  namespace EpetraWrappers
   {
     class Vector;
   }
@@ -178,6 +199,24 @@ namespace LinearAlgebra
     void reinit (const IndexSet &locally_stored_indices,
                  const bool      omit_zeroing_entries = false);
 
+#ifdef DEAL_II_WITH_CXX11
+    /**
+     * Apply the functor @p func to each element of the vector. The functor
+     * should look like
+     * <code>
+     * struct Functor
+     * {
+     *    void operator() (Number &value);
+     * };
+     * </code>
+     *
+     * @note This function requires C++11 and read_write_vector.templates.h
+     * needs to be included.
+     */
+    template <typename Functor>
+    void apply(const Functor &func);
+#endif
+
     /**
      * Swap the contents of this vector and the other vector @p v. One could
      * do this operation with a temporary variable and copying over the data
@@ -205,29 +244,67 @@ namespace LinearAlgebra
     ReadWriteVector<Number> &
     operator= (const ReadWriteVector<Number2> &in_vector);
 
-#ifdef DEAL_II_WITH_PETSC
-    /**
-     * Imports all the elements present in the vector's IndexSet from the
-     * input vector @p petsc_vec.
-     */
-    ReadWriteVector<Number> &
-    operator= (const PETScWrappers::MPI::Vector &petsc_vec);
-#endif
-
-#ifdef DEAL_II_WITH_TRILINOS
-    /**
-     * Imports all the elements present in the vector's IndexSet from the
-     * input vector @p trilinos_vec.
-     */
-    ReadWriteVector<Number> &
-    operator= (const TrilinosWrappers::MPI::Vector &trilinos_vec);
-#endif
-
     /**
      * Sets all elements of the vector to the scalar @p s. This operation is
      * only allowed if @p s is equal to zero.
      */
     ReadWriteVector<Number> &operator = (const Number s);
+
+    /**
+     * Imports all the elements present in the vector's IndexSet from the
+     * input vector @p vec. VectorOperation::values @p operation
+     * is used to decide if the elements in @p V should be added to the
+     * current vector or replace the current elements. The last parameter can
+     * be used if the same communication pattern is used multiple times. This
+     * can be used to improve performance.
+     */
+    void import(const distributed::Vector<Number> &vec,
+                VectorOperation::values operation,
+                std_cxx11::shared_ptr<const CommunicationPatternBase> communication_pattern =
+                  std_cxx11::shared_ptr<const CommunicationPatternBase> ());
+
+#ifdef DEAL_II_WITH_PETSC
+    /**
+     * Imports all the elements present in the vector's IndexSet from the input
+     * vector @p petsc_vec. VectorOperation::values @p operation is used to decide
+     * if the elements in @p V should be added to the current vector or replace
+     * the current elements. The last parameter can be used if the same
+     * communication pattern is used multiple times. This can be used to improve
+     * performance.
+     */
+    void import(const PETScWrappers::MPI::Vector &petsc_vec,
+                VectorOperation::values operation,
+                std_cxx11::shared_ptr<const CommunicationPatternBase> communication_pattern =
+                  std_cxx11::shared_ptr<const CommunicationPatternBase> ());
+#endif
+
+#ifdef DEAL_II_WITH_TRILINOS
+    /**
+     * Imports all the elements present in the vector's IndexSet from the input
+     * vector @p trilinos_vec. VectorOperation::values @p operation is used to
+     * decide if the elements in @p V should be added to the current vector or
+     * replace the current elements. The last parameter can be used if the same
+     * communication pattern is used multiple times. This can be used to improve
+     * performance.
+     */
+    void import(const TrilinosWrappers::MPI::Vector &trilinos_vec,
+                VectorOperation::values operation,
+                std_cxx11::shared_ptr<const CommunicationPatternBase> communication_pattern =
+                  std_cxx11::shared_ptr<const CommunicationPatternBase> ());
+
+    /**
+     * Imports all the elements present in the vector's IndexSet from the input
+     * vector @p epetra_vec. VectorOperation::values @p operation is used to
+     * decide if the elements in @p V should be added to the current vector or
+     * replace the current elements. The last parameter can be used if the same
+     * communication pattern is used multiple times. This can be used to improve
+     * performance.
+     */
+    void import(const EpetraWrappers::Vector &epetra_vec,
+                VectorOperation::values operation,
+                std_cxx11::shared_ptr<const CommunicationPatternBase> communication_pattern =
+                  std_cxx11::shared_ptr<const CommunicationPatternBase> ());
+#endif
 
     /**
      * The value returned by this function denotes the dimension of the vector
@@ -405,6 +482,18 @@ namespace LinearAlgebra
     //@}
 
   protected:
+#ifdef DEAL_II_WITH_TRILINOS
+    /**
+     * Import all the elements present in the vector's IndexSet from the input
+     * vector @p multivector. This is an helper function and it should not be
+     * used directly.
+     */
+    void import(const Epetra_MultiVector                       &multivector,
+                const IndexSet                                 &locally_owned_elements,
+                VectorOperation::values                         operation,
+                const MPI_Comm                                 &mpi_comm,
+                std_cxx11::shared_ptr<const CommunicationPatternBase> communication_pattern);
+#endif
 
     /**
      * Return the local position of @p global_index.
@@ -422,16 +511,83 @@ namespace LinearAlgebra
      */
     void resize_val (const size_type new_allocated_size);
 
+#if defined(DEAL_II_WITH_TRILINOS) && defined(DEAL_II_WITH_MPI)
+    /**
+     * Return a EpetraWrappers::Communication pattern and store it for future
+     * use.
+     */
+    EpetraWrappers::CommunicationPattern
+    create_epetra_comm_pattern(const IndexSet &source_index_set,
+                               const MPI_Comm &mpi_comm);
+#endif
+
     /**
      * Indices of the elements stored.
      */
     IndexSet stored_elements;
 
     /**
+     * IndexSet of the elements of the last imported vector;
+     */
+    IndexSet source_stored_elements;
+
+    /**
+     * CommunicationPattern for the communication between the
+     * source_stored_elements IndexSet and the current vector.
+     */
+    std_cxx11::shared_ptr<CommunicationPatternBase> comm_pattern;
+
+    /**
      * Pointer to the array of local elements of this vector.
      */
-    // TODO: use AlignedVector here for storage
     Number *val;
+
+    /**
+     * For parallel loops with TBB, this member variable stores the affinity
+     * information of loops.
+     */
+    mutable std_cxx11::shared_ptr< ::dealii::parallel::internal::TBBPartitioner> thread_loop_partitioner;
+
+    /**
+     * Make all other ReadWriteVector types friends.
+     */
+    template <typename Number2> friend class ReadWriteVector;
+
+#ifdef DEAL_II_WITH_CXX11
+  private:
+    /**
+     * This class provides a wrapper around a Functor which acts on
+     * single elements of the vector. This is necessary to use
+     * tbb::parallel_for which requires a TBBForFunctor.
+     */
+    template <typename Functor>
+    class FunctorTemplate
+    {
+    public:
+      /**
+       * Constructor. Take a functor and store a copy of it.
+       */
+      FunctorTemplate(ReadWriteVector<Number> &parent,
+                      const Functor &functor);
+
+      /**
+       * Evaluate the element with the stored copy of the functor.
+       */
+      virtual void operator() (const size_type begin,
+                               const size_type end);
+
+    private:
+      /**
+       * Alias to the ReadWriteVector object that owns the FunctorTemplate.
+       */
+      ReadWriteVector &parent;
+
+      /**
+       * Copy of the functor.
+       */
+      const Functor &functor;
+    };
+#endif
   };
 
   /*@}*/
@@ -445,8 +601,10 @@ namespace LinearAlgebra
   inline
   ReadWriteVector<Number>::ReadWriteVector ()
     :
-    val (NULL)
-  {}
+    val(NULL)
+  {
+    reinit(0, true);
+  }
 
 
 
@@ -455,7 +613,7 @@ namespace LinearAlgebra
   ReadWriteVector<Number>::ReadWriteVector (const ReadWriteVector<Number> &v)
     :
     Subscriptor(),
-    val (NULL)
+    val(NULL)
   {
     this->operator=(v);
   }
@@ -466,7 +624,7 @@ namespace LinearAlgebra
   inline
   ReadWriteVector<Number>::ReadWriteVector (const size_type size)
     :
-    val (NULL)
+    val(NULL)
   {
     reinit (size, false);
   }
@@ -477,7 +635,7 @@ namespace LinearAlgebra
   inline
   ReadWriteVector<Number>::ReadWriteVector (const IndexSet &locally_stored_indices)
     :
-    val (NULL)
+    val(NULL)
   {
     reinit (locally_stored_indices);
   }
@@ -489,35 +647,6 @@ namespace LinearAlgebra
   ReadWriteVector<Number>::~ReadWriteVector ()
   {
     resize_val(0);
-  }
-
-
-
-  template <typename Number>
-  inline
-  ReadWriteVector<Number> &
-  ReadWriteVector<Number>::operator= (const ReadWriteVector<Number> &in_vector)
-  {
-    resize_val(in_vector.n_elements());
-    stored_elements = in_vector.get_stored_elements();
-    std::copy(in_vector.begin(),in_vector.end(),begin());
-
-    return *this;
-  }
-
-
-
-  template <typename Number>
-  template <typename Number2>
-  inline
-  ReadWriteVector<Number> &
-  ReadWriteVector<Number>::operator= (const ReadWriteVector<Number2> &in_vector)
-  {
-    resize_val(in_vector.n_elements());
-    stored_elements = in_vector.get_stored_elements();
-    std::copy(in_vector.begin(),in_vector.end(),begin());
-
-    return *this;
   }
 
 
@@ -686,21 +815,6 @@ namespace LinearAlgebra
 
 
   template <typename Number>
-  inline
-  ReadWriteVector<Number> &
-  ReadWriteVector<Number>::operator= (const Number s)
-  {
-    Assert(s==static_cast<Number>(0), ExcMessage("Only 0 can be assigned to a vector."));
-    (void)s;
-
-    std::fill(begin(),end(),Number());
-
-    return *this;
-  }
-
-
-
-  template <typename Number>
   template <typename Number2>
   inline
   void
@@ -720,7 +834,8 @@ namespace LinearAlgebra
   ReadWriteVector<Number>::add (const std::vector<size_type>   &indices,
                                 const ReadWriteVector<Number2> &values)
   {
-    for (size_type i=0; i<indices.size(); ++i)
+    const size_type size = indices.size();
+    for (size_type i=0; i<size; ++i)
       {
         Assert (numbers::is_finite(values[i]),
                 ExcMessage("The given value is not finite but either infinite or Not A Number (NaN)"));
@@ -745,6 +860,33 @@ namespace LinearAlgebra
         this->operator()(indices[i]) += values[i];
       }
   }
+
+
+
+#ifdef DEAL_II_WITH_CXX11
+  template <typename Number>
+  template <typename Functor>
+  inline
+  ReadWriteVector<Number>::FunctorTemplate<Functor>::FunctorTemplate(
+    ReadWriteVector<Number> &parent,
+    const Functor &functor)
+    :
+    parent(parent),
+    functor(functor)
+  {}
+
+
+
+  template <typename Number>
+  template <typename Functor>
+  void
+  ReadWriteVector<Number>::FunctorTemplate<Functor>::operator() (const size_type begin,
+      const size_type end)
+  {
+    for (size_type i=begin; i<end; ++i)
+      functor(parent.val[i]);
+  }
+#endif
 
 #endif  // ifndef DOXYGEN
 

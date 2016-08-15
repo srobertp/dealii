@@ -1,3 +1,28 @@
+/* ---------------------------------------------------------------------
+ *
+ * Copyright (C) 2009 - 2016 by the deal.II authors
+ *
+ * This file is part of the deal.II library.
+ *
+ * The deal.II library is free software; you can use it, redistribute
+ * it, and/or modify it under the terms of the GNU Lesser General
+ * Public License as published by the Free Software Foundation; either
+ * version 2.1 of the License, or (at your option) any later version.
+ * The full text of the license can be found in the file LICENSE at
+ * the top level of the deal.II distribution.
+ *
+ * ---------------------------------------------------------------------
+
+ *
+ * This file tests the PARPACK interface for a symmetric operator taken from step-36
+ * using Trilinos mpi vectors.
+ *
+ * We test that the computed vectors are eigenvectors and mass-orthonormal, i.e.
+ * a) (A*x_i-\lambda*B*x_i).L2() == 0
+ * b) x_j*B*x_i = \delta_{i,j}
+ *
+ */
+
 #include "../tests.h"
 
 #include <deal.II/base/logstream.h>
@@ -11,7 +36,7 @@
 #include <deal.II/fe/fe_tools.h>
 #include <deal.II/grid/grid_generator.h>
 #include <deal.II/lac/sparsity_tools.h>
-#include <deal.II/lac/compressed_simple_sparsity_pattern.h>
+#include <deal.II/lac/dynamic_sparsity_pattern.h>
 
 #include <deal.II/lac/iterative_inverse.h>
 
@@ -89,7 +114,6 @@ locally_owned_dofs_per_subdomain (const DoFHandlerType  &dof_handler)
 
 void test ()
 {
-#ifdef DEAL_II_ARPACK_WITH_PARPACK
   const unsigned int global_mesh_refinement_steps = 5;
   const unsigned int number_of_eigenvalues        = 5;
 
@@ -151,7 +175,7 @@ void test ()
                                             constraints);
   constraints.close ();
 
-  CompressedSimpleSparsityPattern csp (locally_relevant_dofs);
+  DynamicSparsityPattern csp (locally_relevant_dofs);
   // Fill in ignoring all cells that are not locally owned
   DoFTools::make_sparsity_pattern (dof_handler, csp,
                                    constraints,
@@ -276,7 +300,8 @@ void test ()
                                                               additional_data);
     eigensolver.reinit(locally_owned_dofs);
     eigensolver.set_shift(shift);
-
+    eigenfunctions[0] = 1.;
+    eigensolver.set_initial_vector(eigenfunctions[0]);
     // avoid output of iterative solver:
     const unsigned int previous_depth = deallog.depth_file(0);
     eigensolver.solve (stiffness_matrix,
@@ -323,14 +348,6 @@ void test ()
 
 
   dof_handler.clear ();
-#else
-  // just output expected results:
-  deallog <<"4.93877"<<std::endl;
-  deallog <<"12.3707"<<std::endl;
-  deallog <<"12.3707"<<std::endl;
-  deallog <<"19.8027"<<std::endl;
-  deallog <<"24.8370"<<std::endl;
-#endif
   deallog << "Ok"<<std::endl;
 }
 

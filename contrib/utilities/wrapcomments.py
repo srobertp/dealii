@@ -1,5 +1,23 @@
 #!/usr/bin/python
 
+## ---------------------------------------------------------------------
+##
+## Copyright (C) 2016 by the deal.II authors
+##
+## This file is part of the deal.II library.
+##
+## The deal.II library is free software; you can use it, redistribute
+## it, and/or modify it under the terms of the GNU Lesser General
+## Public License as published by the Free Software Foundation; either
+## version 2.1 of the License, or (at your option) any later version.
+## The full text of the license can be found in the file LICENSE at
+## the top level of the deal.II distribution.
+##
+## ---------------------------------------------------------------------
+
+#
+# Written by timo.heister@gmail.com
+
 # run this script on all headers of deal.II to fix comment line wrapping for
 # doxygen comments.
 # Example:
@@ -102,6 +120,8 @@ def format_block(lines, infostr=""):
 
     ops_separate_line = ["<ol>", "</ol>", "<ul>", "</ul>", "@{", "@}", "<br>"]
 
+    # separate and do not break:
+    ops_title_line = ["@page", "@name"]
 
     #todo:
     #  @arg @c @cond  @em @endcond @f{ @internal @name @post @pre  @sa 
@@ -131,14 +151,15 @@ def format_block(lines, infostr=""):
             thisline = lines[idx].strip()[2:]
             out.append(start + thisline)
             
-        elif "@page" in lines[idx]:
-            # do not break @page
+        elif one_in(ops_title_line, lines[idx]):
+            # do not break @page, etc.
             if curlines!=[]:
                 out.extend(wrap_block(remove_junk(curlines), start))
                 curlines=[]
             thisline = remove_junk([lines[idx]])[0]
-            if not thisline.startswith("@page") and not thisline.startswith("(@page"):
-                print ("%s warning %s not at start of line"%(infostr, "@page"), file=sys.stderr)
+            
+            if not thisline.split(" ")[0] in ops_title_line:
+                print ("%s warning title not at start of line"%(infostr), file=sys.stderr)
             out.append(start + thisline.strip())
 
         elif "@ref" in lines[idx]:
@@ -503,6 +524,13 @@ lineI = [" /**", \
 lineO = lineI
 assert(format_block(lineI)==lineO)
 
+# do not break @name:
+longtext = "bla bla"*20
+lineI = [" /**", \
+         "  * @name " + longtext, \
+         "  * hello", \
+         "  */"]
+assert(format_block(lineI)==lineI)
 
 
 #print (lineI)

@@ -35,6 +35,7 @@ DEAL_II_ENABLE_EXTRA_DIAGNOSTICS
 #include <sstream>
 #include <cctype>
 #include <limits>
+#include <cstring>
 
 
 DEAL_II_NAMESPACE_OPEN
@@ -178,25 +179,65 @@ namespace Patterns
 
 
 
-  std::string Integer::description () const
+  std::string Integer::description (const OutputStyle style) const
   {
-    // check whether valid bounds
-    // were specified, and if so
-    // output their values
-    if (lower_bound <= upper_bound)
+    switch (style)
       {
-        std::ostringstream description;
+      case Machine:
+      {
+        // check whether valid bounds
+        // were specified, and if so
+        // output their values
+        if (lower_bound <= upper_bound)
+          {
+            std::ostringstream description;
 
-        description << description_init
-                    <<" range "
-                    << lower_bound << "..." << upper_bound
-                    << " (inclusive)]";
-        return description.str();
+            description << description_init
+                        <<" range "
+                        << lower_bound << "..." << upper_bound
+                        << " (inclusive)]";
+            return description.str();
+          }
+        else
+          // if no bounds were given, then
+          // return generic string
+          return "[Integer]";
       }
-    else
-      // if no bounds were given, then
-      // return generic string
-      return "[Integer]";
+      case Text:
+      {
+        if (lower_bound <= upper_bound)
+          {
+            std::ostringstream description;
+
+            description << "An integer n such that "
+                        << lower_bound << " <= n <= " << upper_bound;
+
+            return description.str();
+          }
+        else
+          return "An integer";
+      }
+      case LaTeX:
+      {
+        if (lower_bound <= upper_bound)
+          {
+            std::ostringstream description;
+
+            description << "An integer $n$ such that $"
+                        << lower_bound << "\\leq n \\leq " << upper_bound
+                        << "$";
+
+            return description.str();
+          }
+        else
+          return "An integer";
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -277,29 +318,90 @@ namespace Patterns
 
 
 
-  std::string Double::description () const
+  std::string Double::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    // check whether valid bounds
-    // were specified, and if so
-    // output their values
-    if (lower_bound <= upper_bound)
-      {
-        description << description_init
-                    << " "
-                    << lower_bound << "..." << upper_bound
-                    << " (inclusive)]";
-        return description.str();
+        if (lower_bound <= upper_bound)
+          {
+            // bounds are valid
+            description << description_init << " ";
+            // We really want to compare with ==, but -Wfloat-equal would create
+            // a warning here, so work around it.
+            if (0==std::memcmp(&lower_bound, &min_double_value, sizeof(lower_bound)))
+              description << "-MAX_DOUBLE";
+            else
+              description << lower_bound;
+            description << "...";
+            if (0==std::memcmp(&upper_bound, &max_double_value, sizeof(upper_bound)))
+              description << "MAX_DOUBLE";
+            else
+              description << upper_bound;
+            description << " (inclusive)]";
+            return description.str();
+          }
+        else
+          {
+            // invalid bounds, assume unbounded double:
+            description << description_init << "]";
+            return description.str();
+          }
       }
-    else
-      // if no bounds were given, then
-      // return generic string
+      case Text:
       {
-        description << description_init
-                    << "]";
-        return description.str();
+        if (lower_bound <= upper_bound)
+          {
+            std::ostringstream description;
+
+            description << "A floating point number v such that ";
+            if (0==std::memcmp(&lower_bound, &min_double_value, sizeof(lower_bound)))
+              description << "-MAX_DOUBLE";
+            else
+              description << lower_bound;
+            description << " <= v <= ";
+            if (0==std::memcmp(&upper_bound, &max_double_value, sizeof(upper_bound)))
+              description << "MAX_DOUBLE";
+            else
+              description << upper_bound;
+
+            return description.str();
+          }
+        else
+          return "A floating point number";
       }
+      case LaTeX:
+      {
+        if (lower_bound <= upper_bound)
+          {
+            std::ostringstream description;
+
+            description << "A floating point number $v$ such that $";
+            if (0==std::memcmp(&lower_bound, &min_double_value, sizeof(lower_bound)))
+              description << "-\\text{MAX\\_DOUBLE}";
+            else
+              description << lower_bound;
+            description << " \\leq v \\leq ";
+            if (0==std::memcmp(&upper_bound, &max_double_value, sizeof(upper_bound)))
+              description << "\\text{MAX\\_DOUBLE}";
+            else
+              description << upper_bound;
+            description << "$";
+
+            return description.str();
+          }
+        else
+          return "A floating point number";
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -313,31 +415,38 @@ namespace Patterns
 
   Double *Double::create (const std::string &description)
   {
-    if (description.compare(0, std::strlen(description_init), description_init) == 0)
-      {
-        std::istringstream is(description);
+    const std::string description_init_str = description_init;
+    if (description.compare(0, description_init_str.size(), description_init_str) != 0)
+      return NULL;
+    if (*description.rbegin() != ']')
+      return NULL;
 
-        if (is.str().size() > strlen(description_init) + 1)
-          {
-            double lower_bound, upper_bound;
+    std::string temp = description.substr(description_init_str.size());
+    if (temp == "]")
+      return new Double(1.0, -1.0); // return an invalid range
 
-            is.ignore(strlen(description_init) + strlen(" range "));
+    if (temp.find("...") != std::string::npos)
+      temp.replace(temp.find("..."), 3, " ");
 
-            if (!(is >> lower_bound))
-              return new Double();
+    double lower_bound = min_double_value,
+           upper_bound = max_double_value;
 
-            is.ignore(strlen("..."));
-
-            if (!(is >> upper_bound))
-              return new Double();
-
-            return new Double(lower_bound, upper_bound);
-          }
-        else
-          return new Double();
-      }
+    std::istringstream is(temp);
+    if (0 == temp.compare(0, std::strlen(" -MAX_DOUBLE"), " -MAX_DOUBLE"))
+      is.ignore(std::strlen(" -MAX_DOUBLE"));
     else
-      return 0;
+      {
+        // parse lower bound and give up if not a double
+        if (!(is >> lower_bound))
+          return NULL;
+      }
+
+    // ignore failure here and assume we got MAX_DOUBLE as upper bound:
+    is >> upper_bound;
+    if (is.fail())
+      upper_bound = max_double_value;
+
+    return new Double(lower_bound, upper_bound);
   }
 
 
@@ -359,7 +468,6 @@ namespace Patterns
 
   bool Selection::match (const std::string &test_string) const
   {
-    std::vector<std::string> choices;
     std::string tmp(sequence);
     // check the different possibilities
     while (tmp.find('|') != std::string::npos)
@@ -379,16 +487,37 @@ namespace Patterns
 
 
 
-  std::string Selection::description () const
+  std::string Selection::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init
-                << " "
-                << sequence
-                << " ]";
+        description << description_init
+                    << " "
+                    << sequence
+                    << " ]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        std::ostringstream description;
+
+        description << "Any one of "
+                    << Utilities::replace_in_string(sequence,"|",", ");
+
+        return description.str();
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -503,19 +632,46 @@ namespace Patterns
 
 
 
-  std::string List::description () const
+  std::string List::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init
-                << " list of <" << pattern->description() << ">"
-                << " of length " << min_elements << "..." << max_elements
-                << " (inclusive)";
-    if (separator != ",")
-      description << " separated by <" << separator << ">";
-    description << "]";
+        description << description_init
+                    << " list of <" << pattern->description(style) << ">"
+                    << " of length " << min_elements << "..." << max_elements
+                    << " (inclusive)";
+        if (separator != ",")
+          description << " separated by <" << separator << ">";
+        description << "]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        std::ostringstream description;
+
+        description << "A list of "
+                    << min_elements << " to " << max_elements
+                    << " elements ";
+        if (separator != ",")
+          description << "separated by <" << separator << "> ";
+        description  << "where each element is ["
+                     << pattern->description(style)
+                     << "]";
+
+        return description.str();
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -680,21 +836,51 @@ namespace Patterns
 
 
 
-  std::string Map::description () const
+  std::string Map::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init
-                << " map of <"
-                << key_pattern->description() << ":"
-                << value_pattern->description() << ">"
-                << " of length " << min_elements << "..." << max_elements
-                << " (inclusive)";
-    if (separator != ",")
-      description << " separated by <" << separator << ">";
-    description << "]";
+        description << description_init
+                    << " map of <"
+                    << key_pattern->description(style) << ":"
+                    << value_pattern->description(style) << ">"
+                    << " of length " << min_elements << "..." << max_elements
+                    << " (inclusive)";
+        if (separator != ",")
+          description << " separated by <" << separator << ">";
+        description << "]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        std::ostringstream description;
+
+        description << "A key-value map of "
+                    << min_elements << " to " << max_elements
+                    << " elements ";
+        if (separator != ",")
+          description << " separated by <" << separator << "> ";
+        description << " where each key is ["
+                    << key_pattern->description(style)
+                    << "]"
+                    << " and each value is ["
+                    << value_pattern->description(style)
+                    << "]";
+
+        return description.str();
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -846,16 +1032,37 @@ namespace Patterns
 
 
 
-  std::string MultipleSelection::description () const
+  std::string MultipleSelection::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init
-                << " "
-                << sequence
-                << " ]";
+        description << description_init
+                    << " "
+                    << sequence
+                    << " ]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        std::ostringstream description;
+
+        description << "A comma-separated list of any of "
+                    << Utilities::replace_in_string(sequence,"|",", ");
+
+        return description.str();
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -903,14 +1110,30 @@ namespace Patterns
 
 
 
-  std::string Bool::description () const
+  std::string Bool::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init
-                << "]";
+        description << description_init
+                    << "]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        return "A boolean value (true or false)";
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -948,14 +1171,30 @@ namespace Patterns
 
 
 
-  std::string Anything::description () const
+  std::string Anything::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init
-                << "]";
+        description << description_init
+                    << "]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        return "Any string";
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -994,18 +1233,37 @@ namespace Patterns
 
 
 
-  std::string FileName::description () const
+  std::string FileName::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init;
+        description << description_init;
 
-    if (file_type == input)
-      description << " (Type: input)]";
-    else
-      description << " (Type: output)]";
+        if (file_type == input)
+          description << " (Type: input)]";
+        else
+          description << " (Type: output)]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        if (file_type == input)
+          return "an input filename";
+        else
+          return "an output filename";
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -1058,13 +1316,29 @@ namespace Patterns
 
 
 
-  std::string DirectoryName::description () const
+  std::string DirectoryName::description (const OutputStyle style) const
   {
-    std::ostringstream description;
+    switch (style)
+      {
+      case Machine:
+      {
+        std::ostringstream description;
 
-    description << description_init << "]";
+        description << description_init << "]";
 
-    return description.str();
+        return description.str();
+      }
+      case Text:
+      case LaTeX:
+      {
+        return "A directory name";
+      }
+      default:
+        AssertThrow(false, ExcNotImplemented());
+      }
+    // Should never occur without an exception, but prevent compiler from
+    // complaining
+    return "";
   }
 
 
@@ -1332,7 +1606,8 @@ ParameterHandler::get_current_full_path (const std::string &name) const
 
 
 bool ParameterHandler::read_input (std::istream &input,
-                                   const std::string &filename)
+                                   const std::string &filename,
+                                   const std::string &last_line)
 {
   AssertThrow (input, ExcIO());
 
@@ -1351,6 +1626,12 @@ bool ParameterHandler::read_input (std::istream &input,
       // Trim the whitespace at the ends of the line here instead of in
       // scan_line. This makes the continuation line logic a lot simpler.
       input_line = Utilities::trim (input_line);
+
+      // If we see the line which is the same as @p last_line ,
+      // terminate the parsing.
+      if (last_line.length() != 0 &&
+          input_line == last_line)
+        break;
 
       // Check whether or not the current line should be joined with the next
       // line before calling scan_line.
@@ -1418,7 +1699,8 @@ bool ParameterHandler::read_input (std::istream &input,
 
 bool ParameterHandler::read_input (const std::string &filename,
                                    const bool optional,
-                                   const bool write_compact)
+                                   const bool write_compact,
+                                   const std::string &last_line)
 {
   PathSearch search("PARAMETERS");
 
@@ -1428,7 +1710,7 @@ bool ParameterHandler::read_input (const std::string &filename,
       std::ifstream file_stream (openname.c_str());
       AssertThrow(file_stream, ExcIO());
 
-      return read_input (file_stream, filename);
+      return read_input (file_stream, filename, last_line);
     }
   catch (const PathSearch::ExcFileNotFound &)
     {
@@ -1448,10 +1730,11 @@ bool ParameterHandler::read_input (const std::string &filename,
 
 
 
-bool ParameterHandler::read_input_from_string (const char *s)
+bool ParameterHandler::read_input_from_string (const char *s,
+                                               const std::string &last_line)
 {
   std::istringstream input_stream (s);
-  return read_input (input_stream, "input string");
+  return read_input (input_stream, "input string", last_line);
 }
 
 
@@ -1736,8 +2019,6 @@ ParameterHandler::declare_alias(const std::string &existing_entry_name,
 
 void ParameterHandler::enter_subsection (const std::string &subsection)
 {
-  const std::string current_path = get_current_path ();
-
   // if necessary create subsection
   if (!entries->get_child_optional (get_current_full_path(subsection)))
     entries->add_child (get_current_full_path(subsection),
@@ -2252,8 +2533,10 @@ ParameterHandler::print_parameters_section (std::ostream      &out,
                       << std::endl;
 
                 // also output possible values
+                const unsigned int pattern_index = p->second.get<unsigned int> ("pattern");
+                const std::string desc_str = patterns[pattern_index]->description (Patterns::PatternBase::LaTeX);
                 out << "{\\it Possible values:} "
-                    << p->second.get<std::string> ("pattern_description")
+                    << desc_str
                     << std::endl;
               }
             else if (is_alias_node (p->second) == true)
@@ -2326,8 +2609,6 @@ ParameterHandler::print_parameters_section (std::ostream      &out,
            p != current_section.not_found(); ++p)
         if (is_parameter_node (p->second) == true)
           {
-            const std::string value = p->second.get<std::string>("value");
-
             // print name and value
             out << std::setw(overall_indent_level*2) << ""
                 << "set "
@@ -2336,9 +2617,10 @@ ParameterHandler::print_parameters_section (std::ostream      &out,
                 << " = ";
 
             // print possible values:
+            const unsigned int pattern_index = p->second.get<unsigned int> ("pattern");
+            const std::string full_desc_str = patterns[pattern_index]->description (Patterns::PatternBase::Text);
             const std::vector<std::string> description_str
-              = Utilities::break_text_into_lines (p->second.get<std::string>
-                                                  ("pattern_description"),
+              = Utilities::break_text_into_lines (full_desc_str,
                                                   78 - overall_indent_level*2 - 2, '|');
             if (description_str.size() > 1)
               {
@@ -2820,11 +3102,12 @@ MultipleParameterLoop::~MultipleParameterLoop ()
 
 
 bool MultipleParameterLoop::read_input (std::istream &input,
-                                        const std::string &filename)
+                                        const std::string &filename,
+                                        const std::string &last_line)
 {
   AssertThrow (input, ExcIO());
 
-  bool x = ParameterHandler::read_input (input, filename);
+  bool x = ParameterHandler::read_input (input, filename, last_line);
   if (x)
     init_branches ();
   return x;

@@ -907,6 +907,145 @@ namespace
         }
   }
 
+
+  template <int dim, int spacedim>
+  void update_periodic_face_map_recursively
+  (const typename Triangulation<dim,spacedim>::cell_iterator &cell_1,
+   const typename Triangulation<dim,spacedim>::cell_iterator &cell_2,
+   unsigned int n_face_1, unsigned int n_face_2,
+   const std::bitset<3> &orientation,
+   typename std::map<std::pair<typename Triangulation<dim, spacedim>::cell_iterator, unsigned int>,
+   std::pair<std::pair<typename Triangulation<dim, spacedim>::cell_iterator, unsigned int>, std::bitset<3> > > &periodic_face_map)
+  {
+    typedef typename Triangulation<dim, spacedim>::face_iterator FaceIterator;
+    const FaceIterator face_1 = cell_1->face(n_face_1);
+    const FaceIterator face_2 = cell_2->face(n_face_2);
+
+    const bool face_orientation = orientation[0];
+    const bool face_flip = orientation[1];
+    const bool face_rotation = orientation[2];
+
+    Assert((dim != 1) || (face_orientation == true && face_flip == false && face_rotation == false),
+           ExcMessage ("The supplied orientation " "(face_orientation, face_flip, face_rotation) " "is invalid for 1D"));
+
+    Assert((dim != 2) || (face_orientation == true && face_rotation == false),
+           ExcMessage ("The supplied orientation " "(face_orientation, face_flip, face_rotation) " "is invalid for 2D"));
+
+    Assert(face_1 != face_2,
+           ExcMessage ("face_1 and face_2 are equal!"));
+
+    Assert(face_1->at_boundary()  &&face_2->at_boundary(),
+           ExcMessage ("Periodic faces must be on the boundary"));
+
+    // insert periodic face pair for both cells
+    typedef std::pair<typename Triangulation<dim,spacedim>::cell_iterator, unsigned int> CellFace;
+    const CellFace cell_face_1 (cell_1, n_face_1);
+    const CellFace cell_face_2 (cell_2, n_face_2);
+    const std::pair<CellFace, std::bitset<3> > cell_face_orientation_2 (cell_face_2, orientation);
+
+    const std::pair<CellFace, std::pair<CellFace, std::bitset<3> > > periodic_faces (cell_face_1, cell_face_orientation_2);
+
+    // Only one periodic neighbor is allowed
+    Assert(periodic_face_map.count(cell_face_1) == 0, ExcInternalError());
+    periodic_face_map.insert(periodic_faces);
+
+    // A lookup table on how to go through the child cells depending on the
+    // orientation:
+    // see Documentation of GeometryInfo for details
+
+    static const int lookup_table_2d[2][2] =
+      //               flip:
+    {
+      { 0, 1 },   // false
+      { 1, 0 }    // true
+    };
+
+    static const int lookup_table_3d[2][2][2][4] =
+      //                           orientation flip  rotation
+    {
+      { { { 0, 2, 1, 3 },       // false       false false
+          { 2, 3, 0, 1 }        // false       false true
+        },
+        { { 3, 1, 2, 0 },       // false       true  false
+          { 1, 0, 3, 2 }        // false       true  true
+        }
+      },
+      { { { 0, 1, 2, 3 },       // true        false false
+          { 1, 3, 0, 2 }        // true        false true
+        },
+        { { 3, 2, 1, 0 },       // true        true  false
+          { 2, 0, 3, 1 }        // true        true  true
+        }
+      }
+    };
+
+    if (cell_1->has_children())
+      {
+        if (cell_2->has_children())
+          {
+            // In the case that both faces have children, we loop over all
+            // children and apply update_periodic_face_map_recursively recursively:
+
+            Assert(face_1->n_children() == GeometryInfo<dim>::max_children_per_face
+                   && face_2->n_children() == GeometryInfo<dim>::max_children_per_face,
+                   ExcNotImplemented());
+
+            for (unsigned int i = 0; i < GeometryInfo<dim>::max_children_per_face; ++i)
+              {
+                // Lookup the index for the second face
+                unsigned int j = 0;
+                switch (dim)
+                  {
+                  case 2:
+                    j = lookup_table_2d[face_flip][i];
+                    break;
+                  case 3:
+                    j = lookup_table_3d[face_orientation][face_flip][face_rotation][i];
+                    break;
+                  default:
+                    AssertThrow(false, ExcNotImplemented());
+                  }
+
+                // find subcell ids that belong to the subface indices
+                unsigned int child_cell_1
+                  = GeometryInfo<dim>::child_cell_on_face
+                    (cell_1->refinement_case(), n_face_1, i, cell_1->face_orientation(n_face_1),
+                     cell_1->face_flip(n_face_1), cell_1->face_rotation(n_face_1), face_1->refinement_case());
+                unsigned int child_cell_2
+                  = GeometryInfo<dim>::child_cell_on_face
+                    (cell_2->refinement_case(), n_face_2, j, cell_2->face_orientation(n_face_2),
+                     cell_2->face_flip(n_face_2), cell_2->face_rotation(n_face_2), face_2->refinement_case());
+
+                Assert(cell_1->child(child_cell_1)->face(n_face_1) == face_1->child(i), ExcInternalError());
+                Assert(cell_2->child(child_cell_2)->face(n_face_2) == face_2->child(j), ExcInternalError());
+
+                // precondition: subcell has the same orientation as cell (so that the face numbers coincide)
+                // recursive call
+                update_periodic_face_map_recursively<dim, spacedim>
+                (cell_1->child(child_cell_1), cell_2->child(child_cell_2),
+                 n_face_1, n_face_2, orientation, periodic_face_map);
+              }
+          }
+        else //only face_1 has children
+          {
+            for (unsigned int i = 0; i < GeometryInfo<dim>::max_children_per_face; ++i)
+              {
+                // find subcell ids that belong to the subface indices
+                unsigned int child_cell_1
+                  = GeometryInfo<dim>::child_cell_on_face(cell_1->refinement_case(), n_face_1, i, cell_1->face_orientation(n_face_1),
+                                                          cell_1->face_flip(n_face_1), cell_1->face_rotation(n_face_1), face_1->refinement_case());
+
+                // recursive call
+                update_periodic_face_map_recursively<dim, spacedim>
+                (cell_1->child(child_cell_1), cell_2,
+                 n_face_1, n_face_2, orientation, periodic_face_map);
+              }
+          }
+
+      }
+  }
+
+
 }// end of anonymous namespace
 
 
@@ -1498,6 +1637,30 @@ namespace internal
         triangulation.vertices = v;
         triangulation.vertices_used = std::vector<bool> (v.size(), true);
 
+        // Check that all cells have positive volume. This check is not run in
+        // the codimension one or two cases since cell_measure is not
+        // implemented for those.
+#ifndef _MSC_VER
+        //TODO: The following code does not compile with MSVC. Find a way around it
+        if (dim == spacedim)
+          {
+            for (unsigned int cell_no = 0; cell_no<cells.size(); ++cell_no)
+              {
+                // If we should check for distorted cells, then we permit them
+                // to exist. If a cell has negative measure, then it must be
+                // distorted (the converse is not necessarily true); hence
+                // throw an exception if no such cells should exist.
+                if (!triangulation.check_for_distorted_cells)
+                  {
+                    const double cell_measure = GridTools::cell_measure<1>
+                                                (triangulation.vertices, cells[cell_no].vertices);
+                    AssertThrow(cell_measure > 0, ExcGridHasInvalidCell(cell_no));
+                  }
+              }
+          }
+#endif
+
+
         // store the indices of the lines
         // which are adjacent to a given
         // vertex
@@ -1676,6 +1839,26 @@ namespace internal
         triangulation.vertices = v;
         triangulation.vertices_used = std::vector<bool> (v.size(), true);
 
+        // Check that all cells have positive volume. This check is not run in
+        // the codimension one or two cases since cell_measure is not
+        // implemented for those.
+#ifndef _MSC_VER
+        //TODO: The following code does not compile with MSVC. Find a way around it
+        if (dim == spacedim)
+          {
+            for (unsigned int cell_no = 0; cell_no<cells.size(); ++cell_no)
+              {
+                // See the note in the 1D function on this if statement.
+                if (!triangulation.check_for_distorted_cells)
+                  {
+                    const double cell_measure = GridTools::cell_measure<2>
+                                                (triangulation.vertices, cells[cell_no].vertices);
+                    AssertThrow(cell_measure > 0, ExcGridHasInvalidCell(cell_no));
+                  }
+              }
+          }
+#endif
+
         // make up a list of the needed
         // lines each line is a pair of
         // vertices. The list is kept
@@ -1779,7 +1962,7 @@ namespace internal
 
         // reserve enough space
         triangulation.levels.push_back (new internal::Triangulation::TriaLevel<dim>);
-        triangulation.faces = new internal::Triangulation::TriaFaces<dim>;
+        triangulation.faces.reset (new internal::Triangulation::TriaFaces<dim>);
         triangulation.levels[0]->reserve_space (cells.size(), dim, spacedim);
         triangulation.faces->lines.reserve_space (0,needed_lines.size());
         triangulation.levels[0]->cells.reserve_space (0,cells.size());
@@ -1928,13 +2111,32 @@ namespace internal
             // need to allow that
             if (boundary_line->boundary_id != numbers::internal_face_boundary_id)
               {
-                AssertThrow (! (line->boundary_id() == numbers::internal_face_boundary_id),
-                             ExcInteriorLineCantBeBoundary(line->vertex_index(0),
-                                                           line->vertex_index(1),
-                                                           boundary_line->boundary_id));
-                line->set_boundary_id (boundary_line->boundary_id);
+                if (line->boundary_id() == numbers::internal_face_boundary_id)
+                  {
+                    // if we are here, it means that we want to assign a boundary indicator
+                    // different from numbers::internal_face_boundary_id to an internal line.
+                    // As said, this would be not allowed, and an exception should be immediately
+                    // thrown. Still, there is the possibility that one only wants to specifiy a
+                    // manifold_id here. If that is the case (manifold_id !=  numbers::flat_manifold_id)
+                    // the operation is allowed. Otherwise, we really tried to specify a boundary_id
+                    // (and not a manifold_id) to an internal face. The exception must be thrown.
+                    if (boundary_line->manifold_id == numbers::flat_manifold_id)
+                      {
+                        // If we are here, this assertion will surely fail, for the aforementioned
+                        // reasons
+                        AssertThrow (! (line->boundary_id() == numbers::internal_face_boundary_id),
+                                     ExcInteriorLineCantBeBoundary(line->vertex_index(0),
+                                                                   line->vertex_index(1),
+                                                                   boundary_line->boundary_id));
+                      }
+                    else
+                      {
+                        line->set_manifold_id (boundary_line->manifold_id);
+                      }
+                  }
+                else
+                  line->set_boundary_id (boundary_line->boundary_id);
               }
-
             line->set_manifold_id (boundary_line->manifold_id);
           }
 
@@ -2024,18 +2226,19 @@ namespace internal
         triangulation.vertices = v;
         triangulation.vertices_used = std::vector<bool> (v.size(), true);
 
-        // check that all cells have
-        // positive volume. if not call the
-        // invert_all_cells_of_negative_grid
-        // and reorder_cells function of
-        // GridReordering before creating
-        // the triangulation
+        // Check that all cells have positive volume.
 #ifndef _MSC_VER
         //TODO: The following code does not compile with MSVC. Find a way around it
         for (unsigned int cell_no = 0; cell_no<cells.size(); ++cell_no)
-          AssertThrow(dealii::GridTools::cell_measure(triangulation.vertices,
-                                                      cells[cell_no].vertices) >= 0,
-                      ExcGridHasInvalidCell(cell_no));
+          {
+            // See the note in the 1D function on this if statement.
+            if (!triangulation.check_for_distorted_cells)
+              {
+                const double cell_measure = GridTools::cell_measure<3>
+                                            (triangulation.vertices, cells[cell_no].vertices);
+                AssertThrow(cell_measure > 0, ExcGridHasInvalidCell(cell_no));
+              }
+          }
 #endif
 
         ///////////////////////////////////////
@@ -2133,7 +2336,7 @@ namespace internal
         // for the lines
         // reserve enough space
         triangulation.levels.push_back (new internal::Triangulation::TriaLevel<dim>);
-        triangulation.faces = new internal::Triangulation::TriaFaces<dim>;
+        triangulation.faces.reset (new internal::Triangulation::TriaFaces<dim>);
         triangulation.levels[0]->reserve_space (cells.size(), dim, spacedim);
         triangulation.faces->lines.reserve_space (0,needed_lines.size());
 
@@ -4216,7 +4419,7 @@ namespace internal
             const unsigned int used_cells
               =  std::count_if (triangulation.levels[level+1]->cells.used.begin(),
                                 triangulation.levels[level+1]->cells.used.end(),
-                                std::bind2nd (std::equal_to<bool>(), true));
+                                std_cxx11::bind (std::equal_to<bool>(), std_cxx11::_1, true));
 
             // reserve space for the used_cells cells already existing
             // on the next higher level as well as for the
@@ -4241,8 +4444,9 @@ namespace internal
         // vertices are already in use
         needed_vertices += std::count_if (triangulation.vertices_used.begin(),
                                           triangulation.vertices_used.end(),
-                                          std::bind2nd (std::equal_to<bool>(),
-                                                        true));
+                                          std_cxx11::bind (std::equal_to<bool>(),
+                                                           std_cxx11::_1,
+                                                           true));
         // if we need more vertices: create them, if not: leave the
         // array as is, since shrinking is not really possible because
         // some of the vertices at the end may be in use
@@ -4538,7 +4742,7 @@ namespace internal
             const unsigned int used_cells
               = std::count_if (triangulation.levels[level+1]->cells.used.begin(),
                                triangulation.levels[level+1]->cells.used.end(),
-                               std::bind2nd (std::equal_to<bool>(), true));
+                               std_cxx11::bind (std::equal_to<bool>(), std_cxx11::_1, true));
 
 
             // reserve space for the used_cells cells already existing
@@ -4574,7 +4778,7 @@ namespace internal
 
         // add to needed vertices how many vertices are already in use
         needed_vertices += std::count_if (triangulation.vertices_used.begin(), triangulation.vertices_used.end(),
-                                          std::bind2nd (std::equal_to<bool>(), true));
+                                          std_cxx11::bind (std::equal_to<bool>(), std_cxx11::_1, true));
         // if we need more vertices: create them, if not: leave the
         // array as is, since shrinking is not really possible because
         // some of the vertices at the end may be in use
@@ -4943,7 +5147,7 @@ namespace internal
             const unsigned int used_cells
               = std::count_if (triangulation.levels[level+1]->cells.used.begin(),
                                triangulation.levels[level+1]->cells.used.end(),
-                               std::bind2nd (std::equal_to<bool>(), true));
+                               std_cxx11::bind (std::equal_to<bool>(), std_cxx11::_1, true));
 
 
             // reserve space for the used_cells cells already existing
@@ -5018,7 +5222,7 @@ namespace internal
 
         // add to needed vertices how many vertices are already in use
         needed_vertices += std::count_if (triangulation.vertices_used.begin(), triangulation.vertices_used.end(),
-                                          std::bind2nd (std::equal_to<bool>(), true));
+                                          std_cxx11::bind (std::equal_to<bool>(), std_cxx11::_1, true));
         // if we need more vertices: create them, if not: leave the
         // array as is, since shrinking is not really possible because
         // some of the vertices at the end may be in use
@@ -8752,18 +8956,15 @@ Triangulation (const MeshSmoothing smooth_grid,
                const bool check_for_distorted_cells)
   :
   smooth_grid(smooth_grid),
-  faces(NULL),
   anisotropic_refinement(false),
-  check_for_distorted_cells(check_for_distorted_cells),
-  vertex_to_boundary_id_map_1d (0),
-  vertex_to_manifold_id_map_1d (0)
+  check_for_distorted_cells(check_for_distorted_cells)
 {
   if (dim == 1)
     {
       vertex_to_boundary_id_map_1d
-        = new std::map<unsigned int, types::boundary_id>();
+      .reset (new std::map<unsigned int, types::boundary_id>());
       vertex_to_manifold_id_map_1d
-        = new std::map<unsigned int, types::manifold_id>();
+      .reset (new std::map<unsigned int, types::manifold_id>());
     }
 
   // connect the any_change signal to the other top level signals
@@ -8781,9 +8982,7 @@ Triangulation (const Triangulation<dim, spacedim> &other)
 // is an error!
   :
   Subscriptor(),
-  check_for_distorted_cells(other.check_for_distorted_cells),
-  vertex_to_boundary_id_map_1d (0),
-  vertex_to_manifold_id_map_1d (0)
+  check_for_distorted_cells(other.check_for_distorted_cells)
 {
   Assert (false, ExcMessage ("You are not allowed to call this constructor "
                              "because copying Triangulation objects is not "
@@ -8792,28 +8991,61 @@ Triangulation (const Triangulation<dim, spacedim> &other)
 
 
 
+#ifdef DEAL_II_WITH_CXX11
+template <int dim, int spacedim>
+Triangulation<dim, spacedim>::
+Triangulation (Triangulation<dim, spacedim> &&tria)
+  :
+  Subscriptor(tria),
+  smooth_grid(tria.smooth_grid),
+  periodic_face_pairs_level_0(std::move(tria.periodic_face_pairs_level_0)),
+  periodic_face_map(std::move(tria.periodic_face_map)),
+  levels(std::move(tria.levels)),
+  faces(std::move(tria.faces)),
+  vertices(std::move(tria.vertices)),
+  vertices_used(std::move(tria.vertices_used)),
+  manifold(std::move(tria.manifold)),
+  anisotropic_refinement(tria.anisotropic_refinement),
+  check_for_distorted_cells(tria.check_for_distorted_cells),
+  number_cache(tria.number_cache),
+  vertex_to_boundary_id_map_1d(std::move(tria.vertex_to_boundary_id_map_1d)),
+  vertex_to_manifold_id_map_1d(std::move(tria.vertex_to_manifold_id_map_1d))
+{
+  for (unsigned int i=0; i<tria.levels.size(); ++i)
+    tria.levels[i] = nullptr;
+
+  tria.number_cache = internal::Triangulation::NumberCache<dim>();
+}
+#endif
+
+
+
 template <int dim, int spacedim>
 Triangulation<dim, spacedim>::~Triangulation ()
 {
   for (unsigned int i=0; i<levels.size(); ++i)
-    delete levels[i];
+    if (levels[i])
+      {
+        delete levels[i];
+        levels[i] = 0;
+      }
   levels.clear ();
-  delete faces;
 
-  // the vertex_to_boundary_id_map_1d field
-  // should be unused except in 1d
+  // the vertex_to_boundary_id_map_1d field should be unused except in
+  // 1d. double check this here, as destruction is a good place to
+  // ensure that what we've done over the course of the lifetime of
+  // this object makes sense
   Assert ((dim == 1)
           ||
           (vertex_to_boundary_id_map_1d == 0),
           ExcInternalError());
-  delete vertex_to_boundary_id_map_1d;
-  // the vertex_to_manifold_id_map_1d field
-  // should be unused except in 1d
+
+  // the vertex_to_manifold_id_map_1d field should be also unused
+  // except in 1d. check this as well
   Assert ((dim == 1)
           ||
           (vertex_to_manifold_id_map_1d == 0),
           ExcInternalError());
-  delete vertex_to_manifold_id_map_1d;
 }
 
 
@@ -8821,8 +9053,13 @@ Triangulation<dim, spacedim>::~Triangulation ()
 template <int dim, int spacedim>
 void Triangulation<dim, spacedim>::clear ()
 {
-  clear_despite_subscriptions();
+  // notify listeners that the triangulation is going down...
   signals.clear();
+
+  // ...and then actually clear all content of it
+  clear_despite_subscriptions();
+  periodic_face_pairs_level_0.clear();
+  periodic_face_map.clear();
 }
 
 
@@ -8881,6 +9118,9 @@ template <int dim, int spacedim>
 void
 Triangulation<dim, spacedim>::set_all_manifold_ids (const types::manifold_id m_number)
 {
+  Assert(n_cells()>0,
+         ExcMessage("Error: set_all_manifold_ids() can not be called on an empty Triangulation."));
+
   typename Triangulation<dim,spacedim>::active_cell_iterator
   cell=this->begin_active(), endc=this->end();
 
@@ -8893,6 +9133,9 @@ template <int dim, int spacedim>
 void
 Triangulation<dim, spacedim>::set_all_manifold_ids_on_boundary (const types::manifold_id m_number)
 {
+  Assert(n_cells()>0,
+         ExcMessage("Error: set_all_manifold_ids_on_boundary() can not be called on an empty Triangulation."));
+
   typename Triangulation<dim,spacedim>::active_cell_iterator
   cell=this->begin_active(), endc=this->end();
 
@@ -8908,6 +9151,9 @@ void
 Triangulation<dim, spacedim>::set_all_manifold_ids_on_boundary (const types::boundary_id b_id,
     const types::manifold_id m_number)
 {
+  Assert(n_cells()>0,
+         ExcMessage("Error: set_all_manifold_ids_on_boundary() can not be called on an empty Triangulation."));
+
   bool boundary_found = false;
   typename Triangulation<dim,spacedim>::active_cell_iterator
   cell=this->begin_active(), endc=this->end();
@@ -9053,7 +9299,8 @@ copy_triangulation (const Triangulation<dim, spacedim> &old_tria)
   anisotropic_refinement = old_tria.anisotropic_refinement;
   smooth_grid            = old_tria.smooth_grid;
 
-  faces         = new internal::Triangulation::TriaFaces<dim>(*old_tria.faces);
+  if (dim > 1)
+    faces.reset (new internal::Triangulation::TriaFaces<dim>(*old_tria.faces));
 
   typename std::map<types::manifold_id,
            SmartPointer<const Manifold<dim,spacedim> , Triangulation<dim, spacedim> > >::const_iterator
@@ -9072,15 +9319,13 @@ copy_triangulation (const Triangulation<dim, spacedim> &old_tria)
 
   if (dim == 1)
     {
-      delete vertex_to_boundary_id_map_1d;
       vertex_to_boundary_id_map_1d
-        = (new std::map<unsigned int, types::boundary_id>
-           (*old_tria.vertex_to_boundary_id_map_1d));
+      .reset(new std::map<unsigned int, types::boundary_id>
+             (*old_tria.vertex_to_boundary_id_map_1d));
 
-      delete vertex_to_manifold_id_map_1d;
       vertex_to_manifold_id_map_1d
-        = (new std::map<unsigned int, types::manifold_id>
-           (*old_tria.vertex_to_manifold_id_map_1d));
+      .reset(new std::map<unsigned int, types::manifold_id>
+             (*old_tria.vertex_to_manifold_id_map_1d));
     }
 
   // inform those who are listening on old_tria of the copy operation
@@ -9510,7 +9755,7 @@ void Triangulation<dim,spacedim>::clear_user_data ()
 {
   // let functions in anonymous namespace do their work
   dealii::clear_user_data (levels);
-  dealii::clear_user_data (faces);
+  dealii::clear_user_data (faces.get());
 }
 
 
@@ -9536,7 +9781,7 @@ namespace
 template <int dim, int spacedim>
 void Triangulation<dim,spacedim>::clear_user_flags_line ()
 {
-  dealii::clear_user_flags_line (levels, faces);
+  dealii::clear_user_flags_line (levels, faces.get());
 }
 
 
@@ -9568,7 +9813,7 @@ namespace
 template <int dim, int spacedim>
 void Triangulation<dim,spacedim>::clear_user_flags_quad ()
 {
-  dealii::clear_user_flags_quad (levels, faces);
+  dealii::clear_user_flags_quad (levels, faces.get());
 }
 
 
@@ -9600,7 +9845,7 @@ namespace
 template <int dim, int spacedim>
 void Triangulation<dim,spacedim>::clear_user_flags_hex ()
 {
-  dealii::clear_user_flags_hex (levels, faces);
+  dealii::clear_user_flags_hex (levels, faces.get());
 }
 
 
@@ -11492,7 +11737,7 @@ unsigned int
 Triangulation<dim, spacedim>::n_used_vertices () const
 {
   return std::count_if (vertices_used.begin(), vertices_used.end(),
-                        std::bind2nd (std::equal_to<bool>(), true));
+                        std_cxx11::bind (std::equal_to<bool>(), std_cxx11::_1, true));
 }
 
 
@@ -11587,6 +11832,29 @@ Triangulation<dim,spacedim>::get_triangulation () const
 }
 
 
+template <int dim, int spacedim>
+void
+Triangulation<dim, spacedim>::add_periodicity
+(const std::vector<GridTools::PeriodicFacePair<cell_iterator> > &
+ periodicity_vector)
+{
+  typedef std::pair<cell_iterator, unsigned int> CellFace;
+  periodic_face_pairs_level_0.insert(periodic_face_pairs_level_0.end(),
+                                     periodicity_vector.begin(),
+                                     periodicity_vector.end());
+
+  //Now initialize periodic_face_map
+  update_periodic_face_map();
+}
+
+template <int dim, int spacedim>
+const typename std::map<std::pair<typename Triangulation<dim, spacedim>::cell_iterator, unsigned int>,
+      std::pair<std::pair<typename Triangulation<dim, spacedim>::cell_iterator, unsigned int>, std::bitset<3> > > &
+      Triangulation<dim, spacedim>::get_periodic_face_map() const
+{
+  return periodic_face_map;
+}
+
 
 template <int dim, int spacedim>
 void
@@ -11626,6 +11894,8 @@ Triangulation<dim, spacedim>::execute_coarsening_and_refinement ()
 
   AssertThrow (cells_with_distorted_children.distorted_cells.size() == 0,
                cells_with_distorted_children);
+
+  update_periodic_face_map();
 }
 
 
@@ -11648,6 +11918,54 @@ Triangulation<dim,spacedim>::reset_active_cell_indices ()
 }
 
 
+template <int dim, int spacedim>
+void
+Triangulation<dim,spacedim>::update_periodic_face_map ()
+{
+  //first empty the currently stored objects
+  periodic_face_map.clear();
+
+  typename std::vector<GridTools::PeriodicFacePair<cell_iterator> >::const_iterator it;
+  for (it=periodic_face_pairs_level_0.begin(); it!=periodic_face_pairs_level_0.end(); ++it)
+    {
+      update_periodic_face_map_recursively<dim, spacedim>
+      (it->cell[0], it->cell[1], it->face_idx[0], it->face_idx[1],
+       it->orientation, periodic_face_map);
+
+      //for the other way, we need to invert the orientation
+      std::bitset<3> inverted_orientation;
+      {
+        bool orientation, flip, rotation;
+        orientation = it->orientation[0];
+        rotation = it->orientation[2];
+        flip = orientation ? rotation ^ it->orientation[1] : it->orientation[1];
+        inverted_orientation[0] = orientation;
+        inverted_orientation[1] = flip;
+        inverted_orientation[2] = rotation;
+      }
+      update_periodic_face_map_recursively<dim, spacedim>
+      (it->cell[1], it->cell[0], it->face_idx[1], it->face_idx[0],
+       inverted_orientation, periodic_face_map);
+    }
+
+  //check consistency
+  typename std::map<std::pair<cell_iterator, unsigned int>,
+           std::pair<std::pair<cell_iterator, unsigned int>, std::bitset<3> >  >::const_iterator it_test;
+  for (it_test=periodic_face_map.begin(); it_test!=periodic_face_map.end(); ++it_test)
+    {
+      const Triangulation<dim, spacedim>::cell_iterator cell_1 = it_test->first.first;
+      const Triangulation<dim, spacedim>::cell_iterator cell_2 = it_test->second.first.first;
+      if (cell_1->level() == cell_2->level())
+        {
+          // if both cells have the same neighbor, then the same pair
+          // order swapped has to be in the map
+          Assert (periodic_face_map[it_test->second.first].first == it_test->first,
+                  ExcInternalError());
+        }
+    }
+}
+
+
 
 template<int dim, int spacedim>
 void
@@ -11660,8 +11978,7 @@ Triangulation<dim, spacedim>::clear_despite_subscriptions()
     delete levels[i];
   levels.clear ();
 
-  delete faces;
-  faces = NULL;
+  faces.reset ();
 
   vertices.clear ();
   vertices_used.clear ();
@@ -13241,11 +13558,12 @@ Triangulation<dim, spacedim>::memory_consumption () const
 
 
 template<int dim, int spacedim>
-Triangulation<dim, spacedim>::DistortedCellList::~DistortedCellList () throw ()
+Triangulation<dim, spacedim>::DistortedCellList::~DistortedCellList () DEAL_II_NOEXCEPT
 {
   // don't do anything here. the compiler will automatically convert
   // any exceptions created by the destructors of the member variables
-  // into abort() in order to satisfy the throw() specification
+  // into abort() in order to satisfy the throw()/noexcept
+  // specification
 }
 
 

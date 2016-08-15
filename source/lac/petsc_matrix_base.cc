@@ -17,6 +17,8 @@
 
 #ifdef DEAL_II_WITH_PETSC
 
+#  include <deal.II/lac/exceptions.h>
+#  include <deal.II/lac/petsc_compatibility.h>
 #  include <deal.II/lac/petsc_full_matrix.h>
 #  include <deal.II/lac/petsc_sparse_matrix.h>
 #  include <deal.II/lac/petsc_parallel_sparse_matrix.h>
@@ -52,7 +54,7 @@ namespace PETScWrappers
       int ierr;
       (void)ierr;
       ierr = MatGetRow(*matrix, this->a_row, &ncols, &colnums, &values);
-      AssertThrow (ierr == 0, MatrixBase::ExcPETScError(ierr));
+      AssertThrow (ierr == 0, ExcPETScError(ierr));
 
       // copy it into our caches if the line
       // isn't empty. if it is, then we've
@@ -66,7 +68,7 @@ namespace PETScWrappers
 
       // and finally restore the matrix
       ierr = MatRestoreRow(*matrix, this->a_row, &ncols, &colnums, &values);
-      AssertThrow (ierr == 0, MatrixBase::ExcPETScError(ierr));
+      AssertThrow (ierr == 0, ExcPETScError(ierr));
     }
   }
 
@@ -81,12 +83,7 @@ namespace PETScWrappers
 
   MatrixBase::~MatrixBase ()
   {
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    const int ierr = MatDestroy (matrix);
-#else
-    const int ierr = MatDestroy (&matrix);
-#endif
-    AssertThrow (ierr == 0, ExcPETScError(ierr));
+    destroy_matrix (matrix);
   }
 
 
@@ -95,17 +92,16 @@ namespace PETScWrappers
   MatrixBase::clear ()
   {
     // destroy the matrix...
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    int ierr = MatDestroy (matrix);
-#else
-    int ierr = MatDestroy (&matrix);
-#endif
-    AssertThrow (ierr == 0, ExcPETScError(ierr));
+    {
+      const PetscErrorCode ierr = destroy_matrix (matrix);
+      AssertThrow(ierr == 0, ExcPETScError(ierr));
+    }
+
     // ...and replace it by an empty
     // sequential matrix
     const int m=0, n=0, n_nonzero_per_row=0;
-    ierr = MatCreateSeqAIJ(PETSC_COMM_SELF, m, n, n_nonzero_per_row,
-                           0, &matrix);
+    const int ierr = MatCreateSeqAIJ(PETSC_COMM_SELF, m, n, n_nonzero_per_row,
+                                     0, &matrix);
     AssertThrow (ierr == 0, ExcPETScError(ierr));
   }
 
@@ -131,32 +127,8 @@ namespace PETScWrappers
   MatrixBase::clear_row (const size_type   row,
                          const PetscScalar new_diag_value)
   {
-    assert_is_compressed ();
-
-    // now set all the entries of this row to zero
-    const PetscInt petsc_row = row;
-
-    IS index_set;
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    ISCreateGeneral (get_mpi_communicator(), 1, &petsc_row, &index_set);
-#else
-    ISCreateGeneral (get_mpi_communicator(), 1, &petsc_row, PETSC_COPY_VALUES, &index_set);
-#endif
-
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    const int ierr
-      = MatZeroRowsIS(matrix, index_set, new_diag_value);
-#else
-    const int ierr
-      = MatZeroRowsIS(matrix, index_set, new_diag_value, PETSC_NULL, PETSC_NULL);
-#endif
-    AssertThrow (ierr == 0, ExcPETScError(ierr));
-
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    ISDestroy (index_set);
-#else
-    ISDestroy (&index_set);
-#endif
+    std::vector<size_type> rows (1, row);
+    clear_rows(rows, new_diag_value);
   }
 
 
@@ -355,7 +327,7 @@ namespace PETScWrappers
 //query this information from PETSc
     int ierr;
     ierr = MatGetRow(*this, row, &ncols, &colnums, &values);
-    AssertThrow (ierr == 0, MatrixBase::ExcPETScError(ierr));
+    AssertThrow (ierr == 0, ExcPETScError(ierr));
 
     // then restore the matrix and return the number of columns in this row as
     // queried previously. Starting with PETSc 3.4, MatRestoreRow actually
@@ -364,7 +336,7 @@ namespace PETScWrappers
     // and return the saved value.
     const PetscInt ncols_saved = ncols;
     ierr = MatRestoreRow(*this, row, &ncols, &colnums, &values);
-    AssertThrow (ierr == 0, MatrixBase::ExcPETScError(ierr));
+    AssertThrow (ierr == 0, ExcPETScError(ierr));
 
     return ncols_saved;
   }
@@ -470,8 +442,8 @@ namespace PETScWrappers
 
 
   MatrixBase &
-  MatrixBase::add (const MatrixBase &other,
-                   const PetscScalar factor)
+  MatrixBase::add (const PetscScalar factor,
+                   const MatrixBase &other)
   {
     const int ierr = MatAXPY (matrix, factor,
                               other, DIFFERENT_NONZERO_PATTERN);
@@ -480,6 +452,15 @@ namespace PETScWrappers
     Assert (ierr == 0, ExcPETScError(ierr));
 
     return *this;
+  }
+
+
+
+  MatrixBase &
+  MatrixBase::add (const MatrixBase &other,
+                   const PetscScalar factor)
+  {
+    return add(factor, other);
   }
 
 
@@ -564,19 +545,10 @@ namespace PETScWrappers
     AssertThrow (ierr == 0, ExcPETScError(ierr));
   }
 
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-  PetscTruth
-#else
-  PetscBool
-#endif
+  PetscBooleanType
   MatrixBase::is_symmetric (const double tolerance)
   {
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    PetscTruth
-#else
-    PetscBool
-#endif
-    truth;
+    PetscBooleanType truth;
     assert_is_compressed ();
     int ierr = MatIsSymmetric (matrix, tolerance, &truth);
     (void)ierr;
@@ -584,19 +556,10 @@ namespace PETScWrappers
     return truth;
   }
 
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-  PetscTruth
-#else
-  PetscBool
-#endif
+  PetscBooleanType
   MatrixBase::is_hermitian (const double tolerance)
   {
-#if DEAL_II_PETSC_VERSION_LT(3,2,0)
-    PetscTruth
-#else
-    PetscBool
-#endif
-    truth;
+    PetscBooleanType truth;
 
     assert_is_compressed ();
     int ierr = MatIsHermitian (matrix, tolerance, &truth);
@@ -635,7 +598,7 @@ namespace PETScWrappers
       {
         int ierr = MatGetRow(*this, row, &ncols, &colnums, &values);
         (void)ierr;
-        AssertThrow (ierr == 0, MatrixBase::ExcPETScError(ierr));
+        AssertThrow (ierr == 0, ExcPETScError(ierr));
 
         for (PetscInt col = 0; col < ncols; ++col)
           {
@@ -643,7 +606,7 @@ namespace PETScWrappers
           }
 
         ierr = MatRestoreRow(*this, row, &ncols, &colnums, &values);
-        AssertThrow (ierr == 0, MatrixBase::ExcPETScError(ierr));
+        AssertThrow (ierr == 0, ExcPETScError(ierr));
       }
 
     AssertThrow (out, ExcIO());

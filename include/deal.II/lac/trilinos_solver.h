@@ -25,7 +25,7 @@
 #  include <deal.II/lac/exceptions.h>
 #  include <deal.II/lac/solver_control.h>
 #  include <deal.II/lac/vector.h>
-#  include <deal.II/lac/parallel_vector.h>
+#  include <deal.II/lac/la_parallel_vector.h>
 
 DEAL_II_DISABLE_EXTRA_DIAGNOSTICS
 #  include <Epetra_LinearProblem.h>
@@ -188,8 +188,8 @@ namespace TrilinosWrappers
      */
     void
     solve (const SparseMatrix                                  &A,
-           dealii::parallel::distributed::Vector<double>       &x,
-           const dealii::parallel::distributed::Vector<double> &b,
+           dealii::LinearAlgebra::distributed::Vector<double>       &x,
+           const dealii::LinearAlgebra::distributed::Vector<double> &b,
            const PreconditionBase                              &preconditioner);
 
     /**
@@ -201,8 +201,8 @@ namespace TrilinosWrappers
      */
     void
     solve (Epetra_Operator                                     &A,
-           dealii::parallel::distributed::Vector<double>       &x,
-           const dealii::parallel::distributed::Vector<double> &b,
+           dealii::LinearAlgebra::distributed::Vector<double>       &x,
+           const dealii::LinearAlgebra::distributed::Vector<double> &b,
            const PreconditionBase                              &preconditioner);
 
 
@@ -568,6 +568,21 @@ namespace TrilinosWrappers
     virtual ~SolverDirect ();
 
     /**
+     * Initializes the direct solver for the matrix <tt>A</tt> and creates a
+     * factorization for it with the package chosen from the additional
+     * data structure. Note that there is no need for a preconditioner
+     * here and solve() is not called.
+     */
+    void initialize (const SparseMatrix &A);
+
+    /**
+     * Solve the linear system <tt>Ax=b</tt> based on the
+     * package set in intialize(). Note the matrix is not refactorized during
+     * this call.
+     */
+    void solve (VectorBase &x, const VectorBase &b);
+
+    /**
      * Solve the linear system <tt>Ax=b</tt>. Creates a factorization of the
      * matrix with the package chosen from the additional data structure and
      * performs the solve. Note that there is no need for a preconditioner
@@ -598,8 +613,8 @@ namespace TrilinosWrappers
      */
     void
     solve (const SparseMatrix                                  &A,
-           dealii::parallel::distributed::Vector<double>       &x,
-           const dealii::parallel::distributed::Vector<double> &b);
+           dealii::LinearAlgebra::distributed::Vector<double>       &x,
+           const dealii::LinearAlgebra::distributed::Vector<double> &b);
 
     /**
      * Access to object that controls convergence.

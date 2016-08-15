@@ -397,7 +397,7 @@ SparsityPattern::compress ()
   const std::size_t nonzero_elements
     = std::count_if (&colnums[rowstart[0]],
                      &colnums[rowstart[rows]],
-                     std::bind2nd(std::not_equal_to<size_type>(), invalid_entry));
+                     std_cxx11::bind(std::not_equal_to<size_type>(), std_cxx11::_1, invalid_entry));
   // now allocate the respective memory
   size_type *new_colnums = new size_type[nonzero_elements];
 
@@ -760,7 +760,7 @@ SparsityPattern::row_position (const size_type i, const size_type j) const
 
 
 std::pair<SparsityPattern::size_type, SparsityPattern::size_type>
-SparsityPattern::matrix_position (const size_type global_index) const
+SparsityPattern::matrix_position (const std::size_t global_index) const
 {
   Assert (compressed == true, ExcNotCompressed());
   Assert (global_index < n_nonzero_elements(),

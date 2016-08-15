@@ -65,7 +65,7 @@ void test ()
                               (dim==3) ? 96 : 12,
                               true);
 
-  FE_Q<dim>                                 temperature_fe(1);
+  FE_Q<dim> temperature_fe(1);
 
   DoFHandler<dim> dof_handler(triangulation);
   dof_handler.distribute_dofs (temperature_fe);
@@ -74,7 +74,7 @@ void test ()
   IndexSet relevant;
   DoFTools::extract_locally_relevant_dofs (dof_handler, relevant);
 
-  CompressedSimpleSparsityPattern sp (relevant);
+  DynamicSparsityPattern sp (relevant);
   typename LA::MPI::SparseMatrix matrix;
   DoFTools::make_sparsity_pattern (dof_handler, sp,
                                    cm, false,

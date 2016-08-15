@@ -34,7 +34,7 @@ DEAL_II_NAMESPACE_OPEN
 
 
 // forward declarations
-namespace parallel
+namespace LinearAlgebra
 {
   namespace distributed
   {
@@ -1800,10 +1800,10 @@ FEEvaluationBase<dim,n_components_,Number>
                     const unsigned int        first_selected_component,
                     const FEEvaluationBase<dim,n_components_other,Number> *other)
   :
-  quad_no            (-1),
+  quad_no            (numbers::invalid_unsigned_int),
   n_fe_components    (n_components_),
-  active_fe_index    (-1),
-  active_quad_index  (-1),
+  active_fe_index    (numbers::invalid_unsigned_int),
+  active_quad_index  (numbers::invalid_unsigned_int),
   matrix_info        (0),
   dof_info           (0),
   mapping_info       (0),
@@ -2117,8 +2117,8 @@ namespace internal
   template <typename Number>
   inline
   Number &
-  vector_access (parallel::distributed::Vector<Number> &vec,
-                 const unsigned int                     entry)
+  vector_access (LinearAlgebra::distributed::Vector<Number> &vec,
+                 const unsigned int                          entry)
   {
     return vec.local_element(entry);
   }
@@ -2131,8 +2131,8 @@ namespace internal
   template <typename Number>
   inline
   Number
-  vector_access (const parallel::distributed::Vector<Number> &vec,
-                 const unsigned int                           entry)
+  vector_access (const LinearAlgebra::distributed::Vector<Number> &vec,
+                 const unsigned int                                entry)
   {
     return vec.local_element(entry);
   }
@@ -2140,7 +2140,8 @@ namespace internal
 
 
   // this is to make sure that the parallel partitioning in the
-  // parallel::distributed::Vector is really the same as stored in MatrixFree
+  // LinearAlgebra::distributed::Vector is really the same as stored in
+  // MatrixFree
   template <typename VectorType>
   inline
   void check_vector_compatibility (const VectorType                             &vec,
@@ -2155,8 +2156,8 @@ namespace internal
 
   template <typename Number>
   inline
-  void check_vector_compatibility (const parallel::distributed::Vector<Number>  &vec,
-                                   const internal::MatrixFreeFunctions::DoFInfo &dof_info)
+  void check_vector_compatibility (const LinearAlgebra::distributed::Vector<Number> &vec,
+                                   const internal::MatrixFreeFunctions::DoFInfo     &dof_info)
   {
     Assert (vec.partitioners_are_compatible(*dof_info.vector_partitioner),
             ExcMessage("The parallel layout of the given vector is not "

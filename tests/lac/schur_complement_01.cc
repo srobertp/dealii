@@ -89,7 +89,7 @@ int main()
       const auto lo_C = linear_operator(C);
       const auto lo_D = linear_operator(D);
 
-      SolverControl solver_control_A (100, 1.0e-10);
+      SolverControl solver_control_A (1, 1.0e-10, false, false);
       SolverCG< Vector<double> > solver_A (solver_control_A);
       PreconditionJacobi< SparseMatrix<double> > preconditioner_A;
       preconditioner_A.initialize(A);
@@ -100,7 +100,7 @@ int main()
       const auto lo_S = schur_complement(lo_A_inv,lo_B,
                                          lo_C,lo_D);
 
-      SolverControl solver_control_S (100, 1.0e-10);
+      SolverControl solver_control_S (1, 1.0e-10, false, false);
       SolverCG< Vector<double> > solver_S (solver_control_S);
       PreconditionJacobi< SparseMatrix<double> > preconditioner_S;
       preconditioner_S.initialize(D); // Same space as S
@@ -109,7 +109,10 @@ int main()
                                              preconditioner_S);
 
       auto rhs = condense_schur_rhs (lo_A_inv,lo_C,f,g);
-      y = lo_S_inv * rhs; // Solve for y
+      check_solver_within_range(
+        y = lo_S_inv * rhs, // Solve for y
+        solver_control_S.last_step(), 1, 1);
+
       x = postprocess_schur_solution (lo_A_inv,lo_B,y,f);
 
       PRINTME("x", x);
@@ -153,7 +156,7 @@ int main()
       const unsigned int rc=10;
       BlockSparsityPattern sparsity_pattern;
       {
-        BlockCompressedSimpleSparsityPattern csp(blks, blks);
+        BlockDynamicSparsityPattern csp(blks, blks);
         for (unsigned int bi=0; bi<blks; ++bi)
           for (unsigned int bj=0; bj<blks; ++bj)
             csp.block(bi,bj).reinit(rc,rc);
@@ -186,7 +189,7 @@ int main()
       Vector<double> &x = s.block(1);
       Vector<double> &y = s.block(0);
 
-      SolverControl solver_control_A (100, 1.0e-10);
+      SolverControl solver_control_A (1, 1.0e-10, false, false);
       SolverCG< Vector<double> > solver_A (solver_control_A);
       PreconditionJacobi< SparseMatrix<double> > preconditioner_A;
       preconditioner_A.initialize(A.block(1,1));
@@ -199,7 +202,7 @@ int main()
 
       // Preconditinoed by D
       {
-        SolverControl solver_control_S (100, 1.0e-10);
+        SolverControl solver_control_S (11, 1.0e-10, false, false);
         SolverCG< Vector<double> > solver_S (solver_control_S);
         PreconditionJacobi< SparseMatrix<double> > preconditioner_S;
         preconditioner_S.initialize(A.block(0,0)); // Same space as S
@@ -208,7 +211,10 @@ int main()
                                                preconditioner_S);
 
         auto rhs = condense_schur_rhs (lo_A_inv,lo_C,f,g);
-        y = lo_S_inv * rhs; // Solve for y
+        check_solver_within_range(
+          y = lo_S_inv * rhs, // Solve for y
+          solver_control_S.last_step(), 11, 11);
+
         x = postprocess_schur_solution (lo_A_inv,lo_B,y,f);
 
         PRINTME("x = s.block(1)", x);
@@ -222,7 +228,7 @@ int main()
                                                   lo_B,lo_C,lo_D);
 
         // Setup inner solver: Approximation of inverse of Schur complement
-        IterationNumberControl solver_control_S_approx (1, 1.0e-10); // Perform only a limited number of sweeps
+        IterationNumberControl solver_control_S_approx (1, 1.0e-10, false, false); // Perform only a limited number of sweeps
         SolverCG< Vector<double> > solver_S_approx (solver_control_S_approx);
         PreconditionJacobi< SparseMatrix<double> > preconditioner_S_approx;
         preconditioner_S_approx.initialize(A.block(0,0)); // Same space as S
@@ -231,14 +237,17 @@ int main()
                                                       preconditioner_S_approx);
 
         // Setup outer solver: Exact inverse of Schur complement
-        SolverControl solver_control_S (100, 1.0e-10);
+        SolverControl solver_control_S (11, 1.0e-10, false, false);
         SolverCG< Vector<double> > solver_S (solver_control_S);
         const auto lo_S_inv = inverse_operator(lo_S,
                                                solver_S,
                                                lo_S_inv_approx);
 
         auto rhs = condense_schur_rhs (lo_A_inv,lo_C,f,g);
-        y = lo_S_inv * rhs; // Solve for y
+        check_solver_within_range(
+          y = lo_S_inv * rhs,// Solve for y
+          solver_control_S.last_step(), 11, 11);
+
         x = postprocess_schur_solution (lo_A_inv,lo_B,y,f);
 
         PRINTME("x = s.block(1)", x);

@@ -24,6 +24,7 @@
 #include <deal.II/base/geometry_info.h>
 #include <deal.II/base/iterator_range.h>
 #include <deal.II/base/std_cxx11/function.h>
+#include <deal.II/base/std_cxx11/unique_ptr.h>
 #include <deal.II/grid/tria_iterator_selector.h>
 
 // Ignore deprecation warnings for auto_ptr.
@@ -31,6 +32,11 @@ DEAL_II_DISABLE_EXTRA_DIAGNOSTICS
 #include <boost/signals2.hpp>
 #include <boost/serialization/vector.hpp>
 #include <boost/serialization/map.hpp>
+#ifdef DEAL_II_WITH_CXX11
+#  include <boost/serialization/unique_ptr.hpp>
+#else
+#  include <boost/serialization/scoped_ptr.hpp>
+#endif
 #include <boost/serialization/split_member.hpp>
 DEAL_II_ENABLE_EXTRA_DIAGNOSTICS
 
@@ -38,6 +44,7 @@ DEAL_II_ENABLE_EXTRA_DIAGNOSTICS
 #include <list>
 #include <map>
 #include <numeric>
+#include <bitset>
 
 
 DEAL_II_NAMESPACE_OPEN
@@ -45,6 +52,11 @@ DEAL_II_NAMESPACE_OPEN
 template <int dim, int spacedim> class Boundary;
 template <int dim, int spacedim> class StraightBoundary;
 template <int dim, int spacedim> class Manifold;
+
+namespace GridTools
+{
+  template<typename CellIterator>  struct PeriodicFacePair;
+}
 
 template <int, int, int> class TriaAccessor;
 template <int spacedim> class TriaAccessor<0,1,spacedim>;
@@ -129,10 +141,11 @@ struct CellData
   types::manifold_id manifold_id;
 
   /**
-   * Default constructor. Sets the member variables to the following values: -
-   * vertex indices to invalid values - boundary or material id zero (the
-   * default for boundary or material ids) - manifold id to
-   * numbers::invalid_manifold_id
+   * Default constructor. Sets the member variables to the following values:
+   *
+   * - vertex indices to invalid values
+   * - boundary or material id zero (the default for boundary or material ids)
+   * - manifold id to numbers::invalid_manifold_id
    */
   CellData ();
 };
@@ -1034,7 +1047,7 @@ namespace internal
  * computers that aren't very reliable (e.g. on very large clusters where
  * individual nodes occasionally fail and then bring down an entire MPI job).
  *
- * For technical reasons, writing and restoring a Triangulation object is not-
+ * For technical reasons, writing and restoring a Triangulation object is not
  * trivial. The primary reason is that unlike many other objects,
  * triangulations rely on many other objects to which they store pointers or
  * with which they interface; for example, triangulations store pointers to
@@ -1455,7 +1468,7 @@ public:
      * automatically generated destructor would have a different one due to
      * member objects.
      */
-    virtual ~DistortedCellList () throw();
+    virtual ~DistortedCellList () DEAL_II_NOEXCEPT;
 
     /**
      * A list of those cells among the coarse mesh cells that are deformed or
@@ -1464,7 +1477,6 @@ public:
     std::list<typename Triangulation<dim,spacedim>::cell_iterator>
     distorted_cells;
   };
-
 
   /**
    * Make the dimension available in function templates.
@@ -1509,6 +1521,16 @@ public:
    * has to be changed to avoid copies.
    */
   Triangulation (const Triangulation<dim, spacedim> &t);
+
+#ifdef DEAL_II_WITH_CXX11
+  /**
+   * Move constructor.
+   *
+   * Create a new triangulation by stealing the internal data of another
+   * triangulation.
+   */
+  Triangulation (Triangulation<dim, spacedim> &&tria);
+#endif
 
   /**
    * Delete the object and all levels of the hierarchy.
@@ -2017,6 +2039,12 @@ public:
      * is called. This signal is also triggered when loading a triangulation
      * from an archive via Triangulation::load() as the previous content of
      * the triangulation is first destroyed.
+     *
+     * The signal is triggered before the data structures of the
+     * triangulation are destroyed. In other words, the functions
+     * attached to this signal get a last look at the triangulation,
+     * for example to save information stored as part of the
+     * triangulation.
      */
     boost::signals2::signal<void ()> clear;
 
@@ -2961,6 +2989,33 @@ public:
   void load (Archive &ar,
              const unsigned int version);
 
+
+  /**
+    * Declare the (coarse) face pairs given in the argument of this function
+    * as periodic. This way it it possible to obtain neighbors across periodic
+    * boundaries.
+    *
+    * The vector can be filled by the function
+    * GridTools::collect_periodic_faces.
+    *
+    * For more information on periodic boundary conditions see
+    * GridTools::collect_periodic_faces,
+    * DoFTools::make_periodicity_constraints and step-45.
+    *
+    * @note Before this function can be used the Triangulation has to be
+    * initialized and must not be refined.
+    */
+  virtual void
+  add_periodicity
+  (const std::vector<GridTools::PeriodicFacePair<cell_iterator> > &);
+
+  /**
+    * Return the periodic_face_map.
+    */
+  const std::map<std::pair<cell_iterator, unsigned int>,std::pair<std::pair<cell_iterator, unsigned int>, std::bitset<3> > > &
+  get_periodic_face_map() const;
+
+
   BOOST_SERIALIZATION_SPLIT_MEMBER()
 
   /**
@@ -3066,7 +3121,26 @@ protected:
                                 const unsigned int       magic_number2,
                                 std::istream            &in);
 
+  /**
+   * Recreate information about periodic neighbors from periodic_face_pairs_level_0.
+   */
+  void update_periodic_face_map ();
+
+
 private:
+  /**
+    * If add_periodicity() is called, this variable stores the given
+    * periodic face pairs on level 0 for later access during the
+    * identification of ghost cells for the multigrid hierarchy and for
+    * setting up the periodic_face_map.
+    */
+  std::vector<GridTools::PeriodicFacePair<cell_iterator> > periodic_face_pairs_level_0;
+
+  /**
+   * If add_periodicity() is called, this variable stores the active periodic face pairs.
+   */
+  std::map<std::pair<cell_iterator, unsigned int>, std::pair<std::pair<cell_iterator, unsigned int>, std::bitset<3> > > periodic_face_map;
+
   /**
    * @name Cell iterator functions for internal use
    * @{
@@ -3274,7 +3348,7 @@ private:
    * in 2D it contains data concerning lines and in 3D quads and lines.  All
    * of these have no level and are therefore treated separately.
    */
-  dealii::internal::Triangulation::TriaFaces<dim> *faces;
+  std_cxx11::unique_ptr<dealii::internal::Triangulation::TriaFaces<dim> > faces;
 
 
   /**
@@ -3331,7 +3405,7 @@ private:
    * this field (that can be modified by TriaAccessor::set_boundary_id) were
    * not a pointer.
    */
-  std::map<unsigned int, types::boundary_id> *vertex_to_boundary_id_map_1d;
+  std_cxx11::unique_ptr<std::map<unsigned int, types::boundary_id> > vertex_to_boundary_id_map_1d;
 
 
   /**
@@ -3353,7 +3427,7 @@ private:
    * this field (that can be modified by TriaAccessor::set_boundary_id) were
    * not a pointer.
    */
-  std::map<unsigned int, types::manifold_id> *vertex_to_manifold_id_map_1d;
+  std_cxx11::unique_ptr<std::map<unsigned int, types::manifold_id> > vertex_to_manifold_id_map_1d;
 
   // make a couple of classes friends
   template <int,int,int> friend class TriaAccessorBase;
